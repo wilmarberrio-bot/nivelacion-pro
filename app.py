@@ -79,11 +79,7 @@ def download():
         return send_file(Params['last_report'], as_attachment=True)
     return "Archivo no disponible", 404
 
-def open_browser():
-    time.sleep(1.5)
-    webbrowser.open('http://127.0.0.1:5000')
-
 if __name__ == '__main__':
-    # Auto-open browser
-    threading.Thread(target=open_browser).start()
-    app.run(port=5000, debug=False)
+    # Mode local
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

@@ -9,7 +9,7 @@ import sugerir_nivelacion
 
 app = Flask(__name__)
 
-# Configuration
+# Almacén temporal para el último reporte (solo para esta sesión)
 Params = {
     'last_report': None
 }
@@ -23,57 +23,60 @@ def analyze():
     try:
         input_file = None
         
-        # Check if file is uploaded
+        # Procesar archivo subido (Cloud Mode)
         if 'file' in request.files:
             file = request.files['file']
             if file.filename != '':
-                # Save to unique temp file
                 input_file = f"temp_{uuid.uuid4().hex}.xlsx"
                 file.save(input_file)
         
-        # If no file uploaded, try to find one in directory (legacy mode)
+        # Si no hay archivo subido, buscar el más reciente (Local Mode)
         if not input_file:
             input_file = sugerir_nivelacion.get_latest_preruta_file()
             
         if not input_file:
-            return jsonify({'status': 'error', 'message': 'No se cargó ningún archivo.'})
+            return jsonify({'status': 'error', 'message': 'Por favor selecciona un archivo Excel primero.'})
         
-        # Run logic
+        # Ejecutar el motor de nivelación
         result = sugerir_nivelacion.generate_suggestions(input_file)
         
-        # Determine if it was successful based on return type
+        # Manejar la respuesta (Tupla: Mensaje, Path)
         if isinstance(result, tuple) and len(result) == 2:
             msg, output_path = result
         else:
             msg = result
             output_path = None
         
-        # Cleanup temp file if it was an upload
+        # Eliminar archivo temporal de entrada
         if input_file.startswith("temp_") and os.path.exists(input_file):
             try:
                 os.remove(input_file)
             except: pass
 
         if output_path:
-            Params['last_report'] = output_path
             return jsonify({
                 'status': 'success', 
                 'message': msg,
                 'file_available': True,
-                'filename': os.path.basename(output_path)
+                'download_url': f"/download/{os.path.basename(output_path)}"
             })
         else:
             return jsonify({'status': 'error', 'message': msg})
             
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': f"Error interno: {str(e)}"})
 
-@app.route('/download')
-def download():
-    if Params['last_report'] and os.path.exists(Params['last_report']):
-        return send_file(Params['last_report'], as_attachment=True)
-    return "Archivo no disponible", 404
+@app.route('/download/<path:filename>')
+def download(filename):
+    # Por seguridad, solo permitir descargas en el directorio raiz
+    if ".." in filename or "/" in filename or "\\" in filename:
+        # Pero os.path.basename limpia eso si viene de la URL
+        filename = os.path.basename(filename)
+        
+    if os.path.exists(filename):
+        return send_file(filename, as_attachment=True)
+    return "Archivo no disponible. Intenta procesar de nuevo.", 404
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    # Para pruebas locales
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))

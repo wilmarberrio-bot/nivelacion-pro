@@ -189,17 +189,17 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
 
         # Estimar carga actual para ver si llega a tiempo
         active_now = sum(1 for o in tech_all_orders if get_status_progress(o['status']) >= 1)
-        prog_before = sum(1 for o in tech_all_orders 
-                         if is_status(o['status'].lower(), MOVABLE_STATUSES)
-                         and parse_franja_hours(o['franja'])[0] is not None
-                         and parse_franja_hours(o['franja'])[0] < franja_start)
+        prog_before = 0
+        for o in tech_all_orders:
+            if is_status(o['status'].lower(), MOVABLE_STATUSES):
+                fs_h, _ = parse_franja_hours(o['franja'])
+                if fs_h is not None and franja_start is not None and fs_h < franja_start:
+                    prog_before += 1
 
         estimated_ready_hour = current_hour + (active_now + prog_before) * ORDER_DURATION_HOURS
 
         if franja_end is not None and estimated_ready_hour > franja_end:
             return False, f"No alcanza: estaria listo ~{estimated_ready_hour:.1f}h, franja termina {franja_end:.1f}h"
-
-    return True, "OK"
 
     return True, "OK"
 
@@ -545,8 +545,13 @@ def generate_suggestions(input_file):
                         if receiver_pending_after > donor_pending_after and donor_pending_after <= MAX_IDEAL_LOAD:
                             continue
 
-                    # Preferir receptores con carga < MAX_IDEAL_LOAD
-                    if t_total < MAX_IDEAL_LOAD:
+                    # Ajuste v5.2: Si esta por finalizar, puede aceptar hasta 6 sin penalizacion heavy
+                    effective_ideal_limit = MAX_IDEAL_LOAD
+                    if tech_has_near_finish.get(t, False):
+                        effective_ideal_limit = MAX_ABSOLUTE_LOAD
+
+                    # Preferir receptores con carga < effective_ideal_limit
+                    if t_total < effective_ideal_limit:
                         priority = 'ideal'
                     elif t_total < MAX_ABSOLUTE_LOAD:
                         priority = 'last_resort'

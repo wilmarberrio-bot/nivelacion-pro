@@ -413,6 +413,7 @@
 
                 if (data.status === 'success') {
                     statusTitle.innerHTML = `<span style="color: var(--accent-green)">●</span> Análisis Exitoso`;
+                    downloadLink.href = data.download_url;
                     downloadLink.style.display = 'inline-flex';
                 } else {
                     statusTitle.innerHTML = `<span style="color: var(--accent-red)">●</span> Error en el Análisis`;
@@ -430,8 +431,6 @@
             }
         }
     </script>
-</body>
-
 </body>
 
 </html>

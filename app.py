@@ -1,10 +1,7 @@
 from flask import Flask, render_template, jsonify, send_file, request
 import os
 import sys
-import threading
-import webbrowser
-import time
-import shutil
+import uuid
 
 # Import core logic
 sys.path.append(os.getcwd())
@@ -31,7 +28,6 @@ def analyze():
             file = request.files['file']
             if file.filename != '':
                 # Save to unique temp file
-                import uuid
                 input_file = f"temp_{uuid.uuid4().hex}.xlsx"
                 file.save(input_file)
         
@@ -60,7 +56,6 @@ def analyze():
 
         if output_path:
             Params['last_report'] = output_path
-            # We could parse suggestions here if we want to display a table
             return jsonify({
                 'status': 'success', 
                 'message': msg,
@@ -80,6 +75,5 @@ def download():
     return "Archivo no disponible", 404
 
 if __name__ == '__main__':
-    # Mode local
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)

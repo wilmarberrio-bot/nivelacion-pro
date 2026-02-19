@@ -1,0 +1,6 @@
+flask
+openpyxl
+pandas
+jinja2
+python-dateutil
+gunicorn

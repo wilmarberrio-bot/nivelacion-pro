@@ -14,11 +14,11 @@ CURRENT_HOUR = datetime.now().hour + datetime.now().minute / 60.0  # Hora actual
 # Constraints
 MAX_IDEAL_LOAD = 5       # Carga ideal maxima por tecnico
 MAX_ABSOLUTE_LOAD = 6    # Carga maxima absoluta (ultima opcion)
-MAX_ORDERS_PER_SLOT = 1  # Estricto: 1 orden por franja (Antes 2)
-MAX_DUPLICATED_SLOTS = 0 # No se permiten franjas solapadas (Antes 1)
+MAX_ORDERS_PER_SLOT = 2  # Permitir solape como ultimo recurso
+MAX_DUPLICATED_SLOTS = 1 # Permitir maximo 1 solape
 MIN_IMBALANCE_TO_MOVE = 1  # Reducido de 2 a 1 para permitir balanceo mas fino (v5)
 ORDER_DURATION_HOURS = 1.25  # Duracion estimada por orden
-MAX_ALLOWED_DISTANCE_KM = 5.0 # Aumentado de 4 a 5 para dar mas margen (v5)
+MAX_ALLOWED_DISTANCE_KM = 8.0 # Aumentado de 5 a 8 para dar mas margen
 
 # Estados - case insensitive
 MOVABLE_STATUSES = ['programado', 'programada']
@@ -163,14 +163,8 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
             return False, "Ya tiene su franja duplicada permitida"
 
     # Restriccion: tarde (>= 14:30)
-    if franja_start is not None and franja_start >= 14.5:
-        tarde_count = 0
-        for f, c in tech_franja_counts.items():
-            fs, _ = parse_franja_hours(f)
-            if fs is not None and fs >= 14.5:
-                tarde_count += c
-        if tarde_count >= 1:
-            return False, "Ya tiene orden en franja de tarde (>=14:30)"
+        if tarde_count >= 2:
+            return False, "Ya tiene 2 ordenes en franjas de tarde (>=14:30)"
 
     # Restriccion temporal: puede el tecnico atender esta franja a tiempo?
     if franja_start is not None:
@@ -585,6 +579,11 @@ def generate_suggestions(input_file):
                         # Priorizar ideal vs last_resort
                         if r_type == 'last_resort':
                             score += 3000
+
+                        # PENALIZACION FUERTE por solape de franja (v5.1)
+                        receiver_in_slot = tech_franja_counts.get(r, {}).get(order_franja, 0)
+                        if receiver_in_slot >= 1:
+                            score += 5000  # Solo mover si es extremadamente necesario
 
                         # Bonus si el receptor tiene orden a punto de terminar (va a liberar capacidad)
                         if tech_has_near_finish.get(r, False):

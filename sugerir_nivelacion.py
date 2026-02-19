@@ -163,8 +163,8 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
             return False, "Ya tiene su franja duplicada permitida"
 
     # Restriccion: tarde (>= 14:30)
+    tarde_count = 0
     if franja_start is not None and franja_start >= 14.5:
-        tarde_count = 0
         for f, c in tech_franja_counts.items():
             fs, _ = parse_franja_hours(f)
             if fs is not None and fs >= 14.5:

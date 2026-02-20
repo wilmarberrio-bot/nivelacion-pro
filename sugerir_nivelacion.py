@@ -21,6 +21,18 @@ ORDER_DURATION_HOURS = 1.0  # Duracion estimada normal por orden
 MAX_ORDER_DURATION_HOURS = 1.5 # Duracion maxima para alertas de riesgo (1h 30min)
 MAX_ALLOWED_DISTANCE_KM = 8.0 # Aumentado de 5 a 8 para dar mas margen
 
+# Adyacencia de zonas para evitar movimientos bruscos
+ZONE_ADJACENCY = {
+    'MEDELLIN': ['BELLO', 'ENVIGADO', 'ITAGUI', 'SABANETA'],
+    'BELLO': ['MEDELLIN'],
+    'ENVIGADO': ['MEDELLIN', 'SABANETA', 'ITAGUI'],
+    'ITAGUI': ['MEDELLIN', 'ENVIGADO', 'SABANETA', 'LA ESTRELLA'],
+    'SABANETA': ['ENVIGADO', 'ITAGUI', 'LA ESTRELLA', 'CALDAS', 'MEDELLIN'],
+    'LA ESTRELLA': ['ITAGUI', 'SABANETA', 'CALDAS'],
+    'CALDAS': ['LA ESTRELLA', 'SABANETA'],
+    'RIONEGRO': [], # Rionegro es zona aislada
+}
+
 # Estados - case insensitive
 MOVABLE_STATUSES = ['programado', 'programada']
 FINALIZED_STATUSES = ['finalizado', 'finalizada', 'por auditar', 'cancelado', 'cancelada',
@@ -655,7 +667,13 @@ def generate_suggestions(input_file):
                         recipients = [r for r in active_techs_in_zone if r != donor]
                     else:
                         if donors_interzone_count.get(donor, 0) >= 1: break
-                        recipients = [t for t in tech_total if t not in all_techs_in_zone and t != donor and t != "SIN_ASIGNAR"]
+                        # Filtrar tecnicos de otras zonas que sean ADYACENTES a la zona de la orden
+                        allowed_neighbor_zones = ZONE_ADJACENCY.get(z.upper(), [])
+                        recipients = [t for t in tech_total 
+                                     if t not in all_techs_in_zone 
+                                     and t != donor 
+                                     and t != "SIN_ASIGNAR"
+                                     and tech_main_zone.get(t, "").upper() in allowed_neighbor_zones]
 
                     for r in recipients:
                         donor_pends = tech_pending.get(donor, 0) if donor != "SIN_ASIGNAR" else 99

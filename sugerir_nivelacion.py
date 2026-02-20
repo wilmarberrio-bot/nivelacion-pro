@@ -167,6 +167,10 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
     - Tiempo real: si tiene una orden activa que no ha terminado, la siguiente se retrasa
     - Si la franja es >=14:30, no apilar mas de 1 orden de tarde
     """
+    # Sobreescribir constantes si estamos en modo sabado (detectado en generate_suggestions)
+    # can_tech_handle_franja ahora recibe estas constantes o las lee de globals?
+    # Para ser mas robusto, las pasaremos o usaremos globals que generate_suggestions modificara.
+    
     franja_start, franja_end = parse_franja_hours(order_franja)
 
     # Restriccion: max ordenes por slot
@@ -202,8 +206,10 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
             if o_start is None: continue
 
             # Si la franja de la orden objetivo coincide con una que ya tiene
-            if abs(o_start - franja_start) < 0.1: # Misma hora inicio
-                return False, f"Ya tiene orden en franja {order_franja}"
+            # ELIMINADO: Bloqueo redundante de misma hora de inicio. 
+            # Se confia en MAX_ORDERS_PER_SLOT y MAX_DUPLICATED_SLOTS.
+            # if abs(o_start - franja_start) < 0.1: # Misma hora inicio
+            #     return False, f"Ya tiene orden en franja {order_franja}"
 
         # Estimar carga actual para ver si llega a tiempo
         active_order = next((o for o in tech_all_orders if 1 <= get_status_progress(o['status']) < 6), None)
@@ -220,9 +226,18 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
 
         estimated_ready_hour = current_hour + rem_hours + (prog_before * ORDER_DURATION_HOURS)
 
-        # Ajuste: buffer de 15 min (0.25h)
-        if franja_end is not None and estimated_ready_hour > (franja_end + 0.25):
-            return False, f"No alcanza: estaria listo ~{estimated_ready_hour:.1f}h, franja termina {franja_end:.1f}h"
+        # Ajuste: buffer de 30 min (0.5h) en lugar de 15 min (0.25h) para dar mas margen
+        # REGLA ESPECIAL: Si la franja ya termino o esta por terminar (ya vamos tarde),
+        # no bloqueamos el movimiento basandonos en el tiempo, sino que confiamos en 
+        # que el balanceo ayudara a terminarla "lo menos tarde posible".
+        if franja_end is not None:
+            is_already_late = current_hour > (franja_end - 0.5)
+            if not is_already_late:
+                if estimated_ready_hour > (franja_end + 0.5):
+                    return False, f"No alcanza: estaria listo ~{estimated_ready_hour:.1f}h, franja termina {franja_end:.1f}h"
+            else:
+                # Si ya vamos tarde, el criterio de tiempo es laxo, pero cuidamos no sobrecargar
+                pass 
 
     return True, "OK"
 
@@ -343,6 +358,28 @@ def generate_suggestions(input_file):
 
     # --- ANALISIS POR ZONA ---
     zones = sorted(set(d['zona'] for d in data if d['zona'] != "SIN_ZONA"))
+
+    # Detectar si es Sabado o turno corto (solo 2 franjas de mañana)
+    # Se considera sabado si hay 2 franjas o menos en total
+    unique_franjas = sorted(list(set(d['franja'] for d in data if d['franja'] != 'Sin Franja')))
+    is_saturday_shift = (len(unique_franjas) <= 2) or (datetime.now().weekday() == 5)
+    
+    global MAX_IDEAL_LOAD, MAX_ABSOLUTE_LOAD, ORDER_DURATION_HOURS, MAX_ORDER_DURATION_HOURS
+    
+    if is_saturday_shift:
+        print(f"MODO SABADO DETECTADO ({len(unique_franjas)} franjas). Ajustando limites: 3-4 ordenes.")
+        # Guardar originales para restaurar o usar locales? 
+        # Modificamos los globals para esta ejecucion
+        MAX_IDEAL_LOAD = 3
+        MAX_ABSOLUTE_LOAD = 4
+        ORDER_DURATION_HOURS = 0.75
+        MAX_ORDER_DURATION_HOURS = 1.1 # 66 min
+    else:
+        # Restaurar defaults por si acaso (en caso de ejecuciones seguidas en memoria)
+        MAX_IDEAL_LOAD = 5
+        MAX_ABSOLUTE_LOAD = 6
+        ORDER_DURATION_HOURS = 1.0
+        MAX_ORDER_DURATION_HOURS = 1.5
 
     suggestions = []
     alerts = []
@@ -550,14 +587,17 @@ def generate_suggestions(input_file):
         for t in sorted(active_techs_in_zone):
             if t == "SIN_ASIGNAR": continue
             
-            # Condicion 1: Sobrecarga absoluta (> 5 ordenes)
-            if tech_total.get(t, 0) > MAX_IDEAL_LOAD and t in tech_movable and tech_movable[t]:
+            # Condicion 1: Sobrecarga absoluta (> 5 ordenes o > 4 en Sabado)
+            # En Sabado, el limite absoluto es 4. En semana es 6.
+            effective_limit = MAX_ABSOLUTE_LOAD if is_saturday_shift else 5 
+            if tech_total.get(t, 0) > effective_limit and t in tech_movable and tech_movable[t]:
                 if t not in donors: donors.append(t)
                 continue
                 
-            # Condicion 2: Desbalance significativo (> promedio + 1.5 y tiene ordenes movibles)
-            # Esto captura al tecnico con 4 ordenes cuando el resto tiene 1-2.
-            if tech_pending.get(t, 0) > (avg_zone_pending + 1.1) and t in tech_movable and tech_movable[t]:
+            # Condicion 2: Desbalance significativo
+            # Si tiene mas que el promedio notablemente o supera la carga ideal (5 en semana, 3 en Sabado)
+            if (tech_pending.get(t, 0) > MAX_IDEAL_LOAD or tech_pending.get(t, 0) > (avg_zone_pending + 1.1)) \
+               and t in tech_movable and tech_movable[t]:
                 if t not in donors: donors.append(t)
                 continue
 
@@ -618,7 +658,17 @@ def generate_suggestions(input_file):
                         recipients = [t for t in tech_total if t not in all_techs_in_zone and t != donor and t != "SIN_ASIGNAR"]
 
                     for r in recipients:
+                        donor_pends = tech_pending.get(donor, 0) if donor != "SIN_ASIGNAR" else 99
+                        recv_pends = tech_pending.get(r, 0)
+                        
+                        # Restriccion basica: el receptor no puede estar ya colapsado
                         if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD: continue
+                        
+                        # MEJORIA: El receptor debe tener al menos 1 orden menos que el donador
+                        # o estar significativamente mas libre si es por balanceo.
+                        if donor != "SIN_ASIGNAR":
+                            diff = donor_pends - recv_pends
+                            if diff < 1: continue
                         
                         can_handle, reason = can_tech_handle_franja(
                             tech_franja_counts.get(r, {}),
@@ -713,8 +763,8 @@ def generate_suggestions(input_file):
                         dist_swap = haversine(o1['lat'], o1['lon'], c2[0], c2[1]) + \
                                     haversine(o2['lat'], o2['lon'], c1[0], c1[1])
                         
-                        # Si el swap ahorra mas de 2km en total
-                        if dist_actual - dist_swap > 2.0:
+                        # Si el swap ahorra mas de 1km en total (Aumentado de 2km para ser mas proactivo)
+                        if dist_actual - dist_swap > 1.0:
                             suggestions.append({
                                 'zona': z, 'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
                                 'origen': f"INTERCAMBIO: {t1} y {t2}",

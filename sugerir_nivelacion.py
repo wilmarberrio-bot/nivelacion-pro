@@ -170,6 +170,14 @@ def count_duplicated_slots(franja_counts):
     return sum(1 for count in franja_counts.values() if count >= 2)
 
 
+def format_hour(h_decimal):
+    """Convierte un decimal (15.5) a formato hora (15:30)."""
+    if h_decimal is None: return "N/A"
+    h = int(h_decimal)
+    m = int((h_decimal - h) * 60)
+    return f"{h:02d}:{m:02d}"
+
+
 def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, current_hour):
     """
     Verifica si un tecnico puede atender una orden en la franja dada,
@@ -496,19 +504,25 @@ def generate_suggestions(input_file):
                     max_est_ready = current_hour + rem_h + (prog_before * MAX_ORDER_DURATION_HOURS)
 
                     if f_end is not None and max_est_ready > f_end:
+                        t_now = format_hour(current_hour)
+                        t_ready = format_hour(max_est_ready)
+                        t_end = format_hour(f_end)
                         alerts.append({
                             'tipo': 'FRANJA EN RIESGO',
                             'zona': z, 'tecnico': t,
-                            'detalle': f"Orden {d['order_id']} franja {d['franja']} - "
-                                      f"Con maximo de 1.5h por orden llegaria ~{max_est_ready:.1f}h. "
-                                      f"Franja termina {f_end:.1f}h. Posible retraso."
+                            'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
+                                      f"Llegaría ~{t_ready} (según carga actual). "
+                                      f"Franja termina {t_end}. [Calculo: Hora {t_now} + "
+                                      f"{rem_h:.1f}h activa + {prog_before} ord. previas x {MAX_ORDER_DURATION_HOURS}h]"
                         })
                     elif f_start is not None and est_ready > f_start and f_end and est_ready <= f_end:
+                        t_ready = format_hour(est_ready)
+                        t_start = format_hour(f_start)
                         alerts.append({
                             'tipo': 'FRANJA AJUSTADA',
                             'zona': z, 'tecnico': t,
-                            'detalle': f"Orden {d['order_id']} franja {d['franja']} - "
-                                      f"Tecnico llegaria ~{est_ready:.1f}h (franja inicia {f_start:.1f}h). Justo a tiempo."
+                            'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
+                                      f"Llegaría ~{t_ready} (Franja inicia {t_start}). Justo a tiempo."
                         })
 
             # Alertas de franjas duplicadas existentes
@@ -758,46 +772,6 @@ def generate_suggestions(input_file):
                     tech_movable[donor].remove(order)
                     moved_count += 1
 
-        # 3. INTERCAMBIOS (SWAPS) POR DISTANCIA (NUEVO)
-        # Solo entre tecnicos que ya tienen ordenes programadas
-        for t1 in sorted(all_techs_in_zone):
-            if t1 == "SIN_ASIGNAR" or not tech_movable.get(t1): continue
-            for t2 in sorted(all_techs_in_zone):
-                if t2 <= t1 or t2 == "SIN_ASIGNAR" or not tech_movable.get(t2): continue
-                
-                for o1 in list(tech_movable[t1]):
-                    for o2 in list(tech_movable[t2]):
-                        # Solo si son de la misma franja o franjas compatibles para no romper tiempos
-                        if o1['franja'] != o2['franja']: continue
-                        if o1['lat'] == 0 or o2['lat'] == 0: continue
-                        
-                        # Calcular distancias actuales vs cruzadas
-                        c1 = get_centroid(tech_locations.get(t1, [(0,0)]))
-                        c2 = get_centroid(tech_locations.get(t2, [(0,0)]))
-                        
-                        dist_actual = haversine(o1['lat'], o1['lon'], c1[0], c1[1]) + \
-                                      haversine(o2['lat'], o2['lon'], c2[0], c2[1])
-                        
-                        dist_swap = haversine(o1['lat'], o1['lon'], c2[0], c2[1]) + \
-                                    haversine(o2['lat'], o2['lon'], c1[0], c1[1])
-                        
-                        # Si el swap ahorra mas de 1km en total (Aumentado de 2km para ser mas proactivo)
-                        if dist_actual - dist_swap > 1.0:
-                            suggestions.append({
-                                'zona': z, 'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
-                                'origen': f"INTERCAMBIO: {t1} y {t2}",
-                                'destino': "Ver IDs Orden",
-                                'order_id': f"{o1['order_id']} <-> {o2['order_id']}",
-                                'franja': o1['franja'],
-                                'address': f"Swap para ahorrar {dist_actual-dist_swap:.1f} km",
-                                'distancia_estimada': "Optimo", 'alerta': "INTERCAMBIO",
-                                'pendientes_origen': tech_pending.get(t1, 0),
-                                'pendientes_destino': tech_pending.get(t2, 0)
-                            })
-                            # Remover de movibles para no volver a procesarlas
-                            tech_movable[t1].remove(o1)
-                            tech_movable[t2].remove(o2)
-                            break
         
         # Calcular Desbalance Final (Paso 5b)
         if active_techs_in_zone:
@@ -808,6 +782,60 @@ def generate_suggestions(input_file):
             current_zone_summary['desbalance_final'] = 0
 
     # ===========================================
+    # PASO 6: INTERCAMBIOS (SWAPS) GLOBALES Y ADYACENTES
+    # ===========================================
+    # Se realiza al final para optimizar rutas cruzadas entre zonas vecinas
+    all_techs_global = sorted([t for t in tech_total.keys() if t != "SIN_ASIGNAR"])
+    
+    for t1 in all_techs_global:
+        if not tech_movable.get(t1): continue
+        for t2 in all_techs_global:
+            if t2 <= t1 or not tech_movable.get(t2): continue
+            
+            # Restriccion de zona: mismas zonas o zonas adyacentes
+            z1 = tech_main_zone.get(t1, "SIN_ZONA").upper()
+            z2 = tech_main_zone.get(t2, "SIN_ZONA").upper()
+            
+            if z1 != z2:
+                allowed_neighbors = ZONE_ADJACENCY.get(z1, [])
+                if z2 not in allowed_neighbors: continue
+            
+            for o1 in list(tech_movable[t1]):
+                for o2 in list(tech_movable[t2]):
+                    # Solo si son de la misma franja
+                    if o1['franja'] != o2['franja']: continue
+                    if o1['lat'] == 0 or o2['lat'] == 0: continue
+                    
+                    # Calcular distancias actuales vs cruzadas
+                    locs1 = tech_locations.get(t1, [(0,0)])
+                    locs2 = tech_locations.get(t2, [(0,0)])
+                    c1 = get_centroid(locs1)
+                    c2 = get_centroid(locs2)
+                    
+                    dist1_actual = haversine(o1['lat'], o1['lon'], c1[0], c1[1])
+                    dist2_actual = haversine(o2['lat'], o2['lon'], c2[0], c2[1])
+                    
+                    dist1_swap = haversine(o1['lat'], o1['lon'], c2[0], c2[1])
+                    dist2_swap = haversine(o2['lat'], o2['lon'], c1[0], c1[1])
+                    
+                    # Si el swap ahorra mas de 1.5km en total (Ajustado para evitar swaps marginales inter-zona)
+                    if (dist1_actual + dist2_actual) - (dist1_swap + dist2_swap) > 1.5:
+                        suggestions.append({
+                            'zona': z1 if z1 == z2 else f"{z1} <-> {z2}",
+                            'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
+                            'origen': f"INTERCAMBIO: {t1} y {t2}",
+                            'destino': "Intercambio de Ordenes",
+                            'order_id': f"{o1['order_id']} <-> {o2['order_id']}",
+                            'franja': o1['franja'],
+                            'address': f"Swap para ahorrar {(dist1_actual + dist2_actual) - (dist1_swap + dist2_swap):.1f} km",
+                            'distancia_estimada': "Optimo", 'alerta': "INTERCAMBIO",
+                            'pendientes_origen': tech_pending.get(t1, 0),
+                            'pendientes_destino': tech_pending.get(t2, 0)
+                        })
+                        # Actualizar movibles para no volver a procesarlas
+                        tech_movable[t1].remove(o1)
+                        tech_movable[t2].remove(o2)
+                        break
     # GENERAR EXCEL
     # ===========================================
     wb_out = openpyxl.Workbook()

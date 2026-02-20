@@ -460,31 +460,42 @@ def generate_suggestions(input_file):
                     })
 
         # ===========================================
-        # PASO 3: Resumen por Zona
+        # PASO 3: Preparar Resumen por Zona (Estado Inicial)
         # ===========================================
-        if tech_pending:
-            avg_pending = sum(tech_pending.values()) / len(tech_pending)
-            zone_summaries.append({
-                'zona': z,
-                'techs': len(tech_pending),
-                'total_pendientes': sum(tech_pending.values()),
-                'total_finalizadas': sum(tech_finalized.get(t, 0) for t in tech_total),
-                'avg': round(avg_pending, 1),
-                'min': min(tech_pending.values()),
-                'max': max(tech_pending.values()),
-            })
+        # Todos los tecnicos que existen en la zona (tuvieran carga o no)
+        active_techs_in_zone = [t for t in tech_total.keys() if t != "SIN_ASIGNAR"]
+        
+        # Ordenes SIN_ASIGNAR de esta zona
+        unassigned_orders = [d for d in zone_data if d['tech'] == "SIN_ASIGNAR" 
+                            and is_status(d['status'].lower(), MOVABLE_STATUSES)]
+
+        initial_pending_total = sum(tech_pending.values())
+        
+        current_zone_summary = {
+            'zona': z,
+            'techs': len(active_techs_in_zone),
+            'pendientes_inicial': initial_pending_total,
+            'pendientes_final': initial_pending_total, # Se actualizara en Paso 5
+            'sin_asignar_inicial': len(unassigned_orders),
+            'sin_asignar_final': len(unassigned_orders),  # Se actualizara en Paso 5
+            'total_finalizadas': sum(tech_finalized.get(t, 0) for t in tech_total),
+            'avg_inicial': round(initial_pending_total / len(active_techs_in_zone), 1) if active_techs_in_zone else 0,
+            'min_inicial': min(tech_pending.values()) if tech_pending else 0,
+            'max_inicial': max(tech_pending.values()) if tech_pending else 0,
+        }
+        zone_summaries.append(current_zone_summary)
 
         # ===========================================
         # PASO 4: Resumen por Subzona (tabla dinamica)
         # ===========================================
-        active_zone_data = [d for d in zone_data
-                           if d['tech'] != "SIN_ASIGNAR"
-                           and not is_status(d['status'].lower(), FINALIZED_STATUSES)]
+        # Incluir ordenes con tecnico
+        active_zone_pending_data = [d for d in zone_data
+                                   if not is_status(d['status'].lower(), FINALIZED_STATUSES)]
 
-        subzones_in_zone = sorted(set(d['subzona'] for d in active_zone_data))
+        subzones_in_zone = sorted(set(d['subzona'] for d in active_zone_pending_data))
 
         for sz in subzones_in_zone:
-            sz_data = [d for d in active_zone_data if d['subzona'] == sz]
+            sz_data = [d for d in active_zone_pending_data if d['subzona'] == sz]
             sz_tech_detail = {}
 
             for d in sz_data:
@@ -501,8 +512,8 @@ def generate_suggestions(input_file):
                     'zona': z, 'subzona': sz, 'tecnico': t,
                     'pendientes': info['total'],
                     'detalle_estados': breakdown,
-                    'finalizadas': tech_finalized.get(t, 0),
-                    'carga_total': tech_total.get(t, 0),
+                    'finalizadas': tech_finalized.get(t, 0) if t != "SIN_ASIGNAR" else 0,
+                    'carga_total': tech_total.get(t, 0) if t != "SIN_ASIGNAR" else info['total'],
                 })
 
         # ===========================================
@@ -616,6 +627,11 @@ def generate_suggestions(input_file):
                     if donor != "SIN_ASIGNAR":
                         tech_total[donor] -= 1
                         tech_pending[donor] = max(0, tech_pending.get(donor, 0) - 1)
+                        current_zone_summary['pendientes_final'] -= 1
+                    else:
+                        current_zone_summary['sin_asignar_final'] -= 1
+                        current_zone_summary['pendientes_final'] += 1
+
                     tech_total[best_receiver] = tech_total.get(best_receiver, 0) + 1
                     tech_pending[best_receiver] = tech_pending.get(best_receiver, 0) + 1
                     
@@ -669,6 +685,14 @@ def generate_suggestions(input_file):
                             tech_movable[t1].remove(o1)
                             tech_movable[t2].remove(o2)
                             break
+        
+        # Calcular Desbalance Final (Paso 5b)
+        if active_techs_in_zone:
+            # Consideramos solo a los tecnicos de esta zona para el desbalance
+            final_pends = [tech_pending.get(t, 0) for t in active_techs_in_zone]
+            current_zone_summary['desbalance_final'] = max(final_pends) - min(final_pends)
+        else:
+            current_zone_summary['desbalance_final'] = 0
 
     # ===========================================
     # GENERAR EXCEL
@@ -678,20 +702,28 @@ def generate_suggestions(input_file):
     # --- HOJA 1: Resumen por Zona ---
     ws_zona = wb_out.active
     ws_zona.title = "Resumen por Zona"
-    zh = ['Zona', 'Tecnicos Activos', 'Total Pendientes', 'Total Finalizadas',
-          'Promedio Pendientes', 'Min', 'Max', 'Desbalance']
+    zh = ['Zona', 'Tecnicos', 'Sin Asignar INI', 'Sin Asignar FIN', 'Pendientes INI', 'Pendientes FIN',
+          'Finalizadas', 'Avg Ini', 'Desbalance Ini', 'Desbalance Fin']
     ws_zona.append(zh)
     style_header_row(ws_zona, len(zh))
 
     for s in zone_summaries:
         row_num = ws_zona.max_row + 1
+        desb_ini = s['max_inicial'] - s['min_inicial']
+        desb_fin = s.get('desbalance_final', 0)
+        
         ws_zona.append([
-            s['zona'], s['techs'], s['total_pendientes'], s['total_finalizadas'],
-            s['avg'], s['min'], s['max'], s['max'] - s['min']
+            s['zona'], s['techs'], s['sin_asignar_inicial'], s['sin_asignar_final'],
+            s['pendientes_inicial'], s['pendientes_final'],
+            s['total_finalizadas'], s['avg_inicial'], desb_ini, desb_fin
         ])
-        d = s['max'] - s['min']
-        if d >= 3: ws_zona.cell(row=row_num, column=8).fill = ALERT_FILL
-        elif d >= 2: ws_zona.cell(row=row_num, column=8).fill = WARN_FILL
+        
+        # Color coding for imbalance
+        if desb_ini >= 3: ws_zona.cell(row=row_num, column=9).fill = ALERT_FILL
+        elif desb_ini >= 2: ws_zona.cell(row=row_num, column=9).fill = WARN_FILL
+
+        if desb_fin >= 3: ws_zona.cell(row=row_num, column=10).fill = ALERT_FILL
+        elif desb_fin >= 2: ws_zona.cell(row=row_num, column=10).fill = WARN_FILL
 
     auto_fit_columns(ws_zona)
 

@@ -477,7 +477,8 @@ def generate_suggestions(input_file):
         # PASO 3: Preparar Resumen por Zona (Estado Inicial)
         # ===========================================
         # Todos los tecnicos que existen en la zona (tuvieran carga o no)
-        active_techs_in_zone = [t for t in tech_total.keys() if t != "SIN_ASIGNAR"]
+        active_techs_in_zone = [t for t, m_zone in tech_main_zone.items() if m_zone == z]
+        all_techs_in_zone = active_techs_in_zone # Para compatibilidad en Paso 5
         
         # Ordenes SIN_ASIGNAR de esta zona
         unassigned_orders = [d for d in zone_data if d['tech'] == "SIN_ASIGNAR" 
@@ -546,7 +547,7 @@ def generate_suggestions(input_file):
         # B) Tecnicos con carga excesiva o por encima del promedio del equipo
         avg_zone_pending = sum(tech_pending.get(t, 0) for t in active_techs_in_zone) / len(active_techs_in_zone) if active_techs_in_zone else 0
         
-        for t in sorted(all_techs_in_zone):
+        for t in sorted(active_techs_in_zone):
             if t == "SIN_ASIGNAR": continue
             
             # Condicion 1: Sobrecarga absoluta (> 5 ordenes)
@@ -561,7 +562,7 @@ def generate_suggestions(input_file):
                 continue
 
         # C) Tecnicos con riesgo de llegar tarde
-        for t in all_techs_in_zone:
+        for t in active_techs_in_zone:
             if t == "SIN_ASIGNAR": continue
             for d in tech_movable.get(t, []):
                 f_start, f_end = parse_franja_hours(d['franja'])
@@ -611,7 +612,7 @@ def generate_suggestions(input_file):
                     if best_receiver: break
                     
                     if pass_num == 1:
-                        recipients = [r for r in all_techs_in_zone if r != donor]
+                        recipients = [r for r in active_techs_in_zone if r != donor]
                     else:
                         if donors_interzone_count.get(donor, 0) >= 1: break
                         recipients = [t for t in tech_total if t not in all_techs_in_zone and t != donor and t != "SIN_ASIGNAR"]

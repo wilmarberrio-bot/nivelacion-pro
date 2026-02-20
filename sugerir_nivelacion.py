@@ -17,7 +17,8 @@ MAX_ABSOLUTE_LOAD = 6    # Carga maxima absoluta (ultima opcion)
 MAX_ORDERS_PER_SLOT = 2  # Permitir solape como ultimo recurso
 MAX_DUPLICATED_SLOTS = 1 # Permitir maximo 1 solape
 MIN_IMBALANCE_TO_MOVE = 1  # Reducido de 2 a 1 para permitir balanceo mas fino (v5)
-ORDER_DURATION_HOURS = 1.25  # Duracion estimada por orden
+ORDER_DURATION_HOURS = 1.0  # Duracion estimada normal por orden
+MAX_ORDER_DURATION_HOURS = 1.5 # Duracion maxima para alertas de riesgo (1h 30min)
 MAX_ALLOWED_DISTANCE_KM = 8.0 # Aumentado de 5 a 8 para dar mas margen
 
 # Estados - case insensitive
@@ -115,6 +116,8 @@ def parse_franja_hours(franja_str):
 
         start = parse_time(parts[0])
         end = parse_time(parts[1])
+        if start is None or end is None:
+            return None, None
         return start, end
     except:
         return None, None
@@ -145,8 +148,8 @@ def estimate_remaining_hours(status):
     if progress == 0: return ORDER_DURATION_HOURS
     if progress == 1: return ORDER_DURATION_HOURS # Inbound
     if progress == 2: return ORDER_DURATION_HOURS # En sitio
-    if progress == 3: return 0.8 # Iniciado
-    if progress == 4: return 0.4 # Mac principal
+    if progress == 3: return 0.6 # Iniciado (ajustado de 0.8 para base 1.0h)
+    if progress == 4: return 0.3 # Mac principal (ajustado de 0.4)
     if progress >= 5: return 0.1 # Dispositivos cargados
     return ORDER_DURATION_HOURS
 
@@ -227,7 +230,10 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
 def coords_to_sector(lat, lon, subzona):
     if lat == 0 and lon == 0:
         return "Sin ubicacion"
-    return f"{subzona} ({round(lat, 4)}, {round(lon, 4)})"
+    try:
+        return f"{subzona} ({round(float(lat), 4)}, {round(float(lon), 4)})"
+    except (ValueError, TypeError):
+        return f"{subzona} (Err Coords)"
 
 
 def style_header_row(ws, num_cols):
@@ -430,17 +436,19 @@ def generate_suggestions(input_file):
                                      and parse_franja_hours(o['franja'])[0] is not None
                                      and parse_franja_hours(o['franja'])[0] < f_start)
 
-                    est_ready = CURRENT_HOUR + (active_now + prog_before) * ORDER_DURATION_HOURS
 
-                    if f_end is not None and est_ready > f_end:
+                    # Riesgo MAXIMO (1.5h) para alertas
+                    max_est_ready = CURRENT_HOUR + (active_now + prog_before) * MAX_ORDER_DURATION_HOURS
+
+                    if f_end is not None and max_est_ready > f_end:
                         alerts.append({
                             'tipo': 'FRANJA EN RIESGO',
                             'zona': z, 'tecnico': t,
                             'detalle': f"Orden {d['order_id']} franja {d['franja']} - "
-                                      f"Tecnico estaria listo ~{est_ready:.1f}h pero franja termina {f_end:.1f}h. "
-                                      f"Considerar mover a otro tecnico que este por finalizar."
+                                      f"Con maximo de 1.5h por orden llegaria ~{max_est_ready:.1f}h. "
+                                      f"Franja termina {f_end:.1f}h. Posible retraso."
                         })
-                    elif f_start is not None and est_ready > f_start and f_end and est_ready <= f_end:
+                    elif f_start is not None and max_est_ready > f_start and f_end and max_est_ready <= f_end:
                         alerts.append({
                             'tipo': 'FRANJA AJUSTADA',
                             'zona': z, 'tecnico': t,
@@ -479,7 +487,7 @@ def generate_suggestions(input_file):
             'sin_asignar_inicial': len(unassigned_orders),
             'sin_asignar_final': len(unassigned_orders),  # Se actualizara en Paso 5
             'total_finalizadas': sum(tech_finalized.get(t, 0) for t in tech_total),
-            'avg_inicial': round(initial_pending_total / len(active_techs_in_zone), 1) if active_techs_in_zone else 0,
+            'avg_inicial': round(float(initial_pending_total) / len(active_techs_in_zone), 1) if active_techs_in_zone else 0.0,
             'min_inicial': min(tech_pending.values()) if tech_pending else 0,
             'max_inicial': max(tech_pending.values()) if tech_pending else 0,
         }
@@ -521,19 +529,31 @@ def generate_suggestions(input_file):
         # ===========================================
         all_techs_in_zone = set(tech_total.keys())
 
-        # 1. DETECTAR DONANTES POR RIESGO O CARGA
+        # 1. DETECTAR DONANTES POR RIESGO, CARGA O DESBALANCE
         donors = []
         
-        # A) SIN_ASIGNAR
+        # A) SIN_ASIGNAR (Siempre donante)
         if "SIN_ASIGNAR" in tech_movable and tech_movable["SIN_ASIGNAR"]:
             donors.append("SIN_ASIGNAR")
 
-        # B) Tecnicos con carga excesiva
+        # B) Tecnicos con carga excesiva o por encima del promedio del equipo
+        avg_zone_pending = sum(tech_pending.values()) / len(active_techs_in_zone) if active_techs_in_zone else 0
+        
         for t in sorted(all_techs_in_zone):
+            if t == "SIN_ASIGNAR": continue
+            
+            # Condicion 1: Sobrecarga absoluta (> 5 ordenes)
             if tech_total.get(t, 0) > MAX_IDEAL_LOAD and t in tech_movable and tech_movable[t]:
                 if t not in donors: donors.append(t)
+                continue
+                
+            # Condicion 2: Desbalance significativo (> promedio + 1.5 y tiene ordenes movibles)
+            # Esto captura al tecnico con 4 ordenes cuando el resto tiene 1-2.
+            if tech_pending.get(t, 0) > (avg_zone_pending + 1.1) and t in tech_movable and tech_movable[t]:
+                if t not in donors: donors.append(t)
+                continue
 
-        # C) Tecnicos con riesgo de llegar tarde (NUEVO)
+        # C) Tecnicos con riesgo de llegar tarde
         for t in all_techs_in_zone:
             if t == "SIN_ASIGNAR": continue
             for d in tech_movable.get(t, []):

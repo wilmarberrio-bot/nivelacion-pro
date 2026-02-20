@@ -128,12 +128,27 @@ def is_status(status_lower, status_list):
 
 
 def get_status_progress(status):
-    """Retorna que tan avanzado esta un estado (0=no iniciado, 5=a punto de finalizar)."""
-    sl = status.lower()
+    """Retorna qué tan avanzado está un estado (0=no iniciado, 5=a punto de finalizar)."""
+    sl = str(status).lower()
     for key, val in STATUS_PROGRESS.items():
         if key in sl:
             return val
     return 0
+
+
+def estimate_remaining_hours(status):
+    """Estima cuántas horas le quedan a la orden actual basado en su progreso."""
+    progress = get_status_progress(status)
+    # Si ya empezó pero no ha avanzado mucho, le queda el total (1.25h)
+    # Si está en 'mac principal', le queda poco (0.4h)
+    # Si está en 'dispositivos cargados', está terminando (0.1h)
+    if progress == 0: return ORDER_DURATION_HOURS
+    if progress == 1: return ORDER_DURATION_HOURS # Inbound
+    if progress == 2: return ORDER_DURATION_HOURS # En sitio
+    if progress == 3: return 0.8 # Iniciado
+    if progress == 4: return 0.4 # Mac principal
+    if progress >= 5: return 0.1 # Dispositivos cargados
+    return ORDER_DURATION_HOURS
 
 
 def count_duplicated_slots(franja_counts):
@@ -174,7 +189,7 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
 
     # Restriccion temporal: puede el tecnico atender esta franja a tiempo?
     if franja_start is not None:
-        # Verificar si ya tiene UNA orden programada en esta franja exacta o que se solape
+        # Verificar si ya tiene UNA orden programada en esta franja exacta
         for o in tech_all_orders:
             o_status = o['status'].lower()
             if is_status(o_status, FINALIZED_STATUSES):
@@ -184,11 +199,15 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
             if o_start is None: continue
 
             # Si la franja de la orden objetivo coincide con una que ya tiene
-            if o_start == franja_start:
+            if abs(o_start - franja_start) < 0.1: # Misma hora inicio
                 return False, f"Ya tiene orden en franja {order_franja}"
 
         # Estimar carga actual para ver si llega a tiempo
-        active_now = sum(1 for o in tech_all_orders if get_status_progress(o['status']) >= 1)
+        active_order = next((o for o in tech_all_orders if 1 <= get_status_progress(o['status']) < 6), None)
+        rem_hours = 0
+        if active_order:
+            rem_hours = estimate_remaining_hours(active_order['status'])
+        
         prog_before = 0
         for o in tech_all_orders:
             if is_status(o['status'].lower(), MOVABLE_STATUSES):
@@ -196,9 +215,10 @@ def can_tech_handle_franja(tech_franja_counts, tech_all_orders, order_franja, cu
                 if fs_h is not None and franja_start is not None and fs_h < franja_start:
                     prog_before += 1
 
-        estimated_ready_hour = current_hour + (active_now + prog_before) * ORDER_DURATION_HOURS
+        estimated_ready_hour = current_hour + rem_hours + (prog_before * ORDER_DURATION_HOURS)
 
-        if franja_end is not None and estimated_ready_hour > franja_end:
+        # Ajuste: buffer de 15 min (0.25h)
+        if franja_end is not None and estimated_ready_hour > (franja_end + 0.25):
             return False, f"No alcanza: estaria listo ~{estimated_ready_hour:.1f}h, franja termina {franja_end:.1f}h"
 
     return True, "OK"
@@ -486,231 +506,169 @@ def generate_suggestions(input_file):
                 })
 
         # ===========================================
-        # PASO 5: NIVELACION INTELIGENTE
+        # PASO 5: NIVELACION INTELIGENTE (Mejorada v6)
         # ===========================================
         all_techs_in_zone = set(tech_total.keys())
 
-        # DONANTES: quienes tienen ordenes que sobran
+        # 1. DETECTAR DONANTES POR RIESGO O CARGA
         donors = []
-
-        # 1) Ordenes SIN_ASIGNAR
+        
+        # A) SIN_ASIGNAR
         if "SIN_ASIGNAR" in tech_movable and tech_movable["SIN_ASIGNAR"]:
             donors.append("SIN_ASIGNAR")
 
-        # 2) Tecnicos con carga total > MAX_IDEAL_LOAD y ordenes programadas para mover
-        for t in sorted(tech_total.keys(), key=lambda x: tech_total[x], reverse=True):
-            if tech_total[t] > MAX_IDEAL_LOAD and t in tech_movable and tech_movable[t]:
-                donors.append(t)
+        # B) Tecnicos con carga excesiva
+        for t in sorted(all_techs_in_zone):
+            if tech_total.get(t, 0) > MAX_IDEAL_LOAD and t in tech_movable and tech_movable[t]:
+                if t not in donors: donors.append(t)
 
-        # 3) Si hay desbalance significativo (>= MIN_IMBALANCE_TO_MOVE) en pendientes
-        if tech_pending:
-            pending_vals = list(tech_pending.values())
-            avg_p = sum(pending_vals) / len(pending_vals)
-            max_p = max(pending_vals)
-            min_p = min(pending_vals)
+        # C) Tecnicos con riesgo de llegar tarde (NUEVO)
+        for t in all_techs_in_zone:
+            if t == "SIN_ASIGNAR": continue
+            for d in tech_movable.get(t, []):
+                f_start, f_end = parse_franja_hours(d['franja'])
+                if f_start is not None:
+                    # Estimar llegada
+                    active_order = next((o for o in tech_all_orders.get(t, []) if 1 <= get_status_progress(o['status']) < 6), None)
+                    rem_h = estimate_remaining_hours(active_order['status']) if active_order else 0
+                    prog_before = sum(1 for o in tech_all_orders.get(t, []) 
+                                     if is_status(o['status'].lower(), MOVABLE_STATUSES)
+                                     and parse_franja_hours(o['franja'])[0] is not None
+                                     and parse_franja_hours(o['franja'])[0] < f_start)
+                    
+                    est_ready = CURRENT_HOUR + rem_h + (prog_before * ORDER_DURATION_HOURS)
+                    
+                    if f_end is not None and est_ready > (f_end + 0.1): # Riesgo detectado
+                        if t not in donors: donors.append(t)
+                        break
 
-            if max_p - min_p >= MIN_IMBALANCE_TO_MOVE:
-                for t in sorted(tech_pending.keys(), key=lambda x: tech_pending[x], reverse=True):
-                    if t not in donors and tech_pending[t] >= avg_p + 1:
-                        if t in tech_movable and tech_movable[t]:
-                            donors.append(t)
-
+        # 2. PROCESAR MOVIMIENTOS SIMPLES
         for donor in donors:
             donor_orders = list(tech_movable.get(donor, []))
-            if not donor_orders:
-                continue
+            if not donor_orders: continue
+            
+            # Ordenar por franja (priorizar AM para moverlas si hay riesgo)
+            donor_orders.sort(key=lambda x: parse_franja_hours(x['franja'])[0] or 99)
 
+            moves_limit = 0
             if donor == "SIN_ASIGNAR":
-                moves_needed = len(donor_orders)
+                moves_limit = len(donor_orders)
             else:
-                excess_total = tech_total.get(donor, 0) - MAX_IDEAL_LOAD
-                excess_pending = tech_pending.get(donor, 0) - max(3, int(avg_p))
-                moves_needed = max(1, int(max(excess_total, excess_pending)))
+                # Si es por riesgo, al menos queremos mover la que esta en riesgo
+                moves_limit = max(1, tech_total.get(donor, 0) - MAX_IDEAL_LOAD)
 
-            for _ in range(min(moves_needed, len(donor_orders))):
-                # Buscar receptores
-                eligible = []
-                for t in all_techs_in_zone:
-                    if t == donor:
-                        continue
-                    t_total = tech_total.get(t, 0)
-                    t_pending = tech_pending.get(t, 0)
-
-                    # REGLA CLAVE: no mover si la diferencia resultante seria < MIN_IMBALANCE_TO_MOVE
-                    if donor != "SIN_ASIGNAR":
-                        donor_pending_after = tech_pending.get(donor, 0) - 1
-                        receiver_pending_after = t_pending + 1
-                        # REGLA v5: Solo bloquear si el receptor queda con MAS que el donante.
-                        # Si quedan IGUALES (ej 3->2 y 1->2), es un movimiento vlido para nivelar.
-                        if receiver_pending_after > donor_pending_after and donor_pending_after <= MAX_IDEAL_LOAD:
-                            continue
-
-                    # Ajuste v5.2: Si esta por finalizar, puede aceptar hasta 6 sin penalizacion heavy
-                    effective_ideal_limit = MAX_IDEAL_LOAD
-                    if tech_has_near_finish.get(t, False):
-                        effective_ideal_limit = MAX_ABSOLUTE_LOAD
-
-                    # Preferir receptores con carga < effective_ideal_limit
-                    if t_total < effective_ideal_limit:
-                        priority = 'ideal'
-                    elif t_total < MAX_ABSOLUTE_LOAD:
-                        priority = 'last_resort'
-                    else:
-                        continue  # Ya esta lleno
-
-                    eligible.append((t, priority))
-
-                if not eligible:
-                    break
-
-                # Buscar mejor match
-                best_order = None
+            moved_count = 0
+            for order in list(donor_orders):
+                if moved_count >= moves_limit: break
+                
                 best_receiver = None
                 best_score = float('inf')
-
-                for order in donor_orders:
-                    order_franja = order['franja']
-                    order_has_loc = (order['lat'] != 0 and order['lon'] != 0)
-                    order_hora_start, order_hora_end = parse_franja_hours(order_franja)
-
-                    for r, r_type in eligible:
-                        # VALIDAR franjas + tiempo
-                        can_handle, reason = can_tech_handle_franja(
-                            tech_franja_counts.get(r, {}),
-                            tech_all_orders.get(r, []),
-                            order_franja,
-                            CURRENT_HOUR
-                        )
-                        if not can_handle:
-                            continue
-
-                        # SCORING
-                        score = 0
-
-                        # Priorizar ideal vs last_resort
-                        if r_type == 'last_resort':
-                            score += 3000
-
-                        # PENALIZACION FUERTE por solape de franja (v5.1)
-                        receiver_in_slot = tech_franja_counts.get(r, {}).get(order_franja, 0)
-                        if receiver_in_slot >= 1:
-                            score += 5000  # Solo mover si es extremadamente necesario
-
-                        # Bonus si el receptor tiene orden a punto de terminar (va a liberar capacidad)
-                        if tech_has_near_finish.get(r, False):
-                            score -= 400
-
-                        # Bonus por misma subzona (v4)
-                        r_subzones = tech_subzones.get(r, set())
-                        if order['subzona'] in r_subzones:
-                            score -= 2500  # Aumentado de 1000 a 2500
-                        else:
-                            score += 1500  # Penalización por cambio de subzona (v4)
-
-                        # Penalizar por carga actual
-                        score += tech_total.get(r, 0) * 200
-                        score += tech_pending.get(r, 0) * 100
-
-                        # Distancia geografica
-                        if order_has_loc and r in tech_locations:
-                            centroid = get_centroid(tech_locations[r])
-                            dist = haversine(order['lat'], order['lon'],
-                                           centroid[0], centroid[1])
-                            
-                            # v4: Límite duro de distancia
-                            if dist > MAX_ALLOWED_DISTANCE_KM:
-                                continue # Traslado muy largo, descartado
-
-                            score += dist * 100 # Mayor peso a la distancia (v4)
-
-                            if dist < 1.0:
-                                score -= 1000
-                            elif dist < 3.0:
-                                score -= 500
-                        else:
-                            # Sin coordenadas en el receptor o en la orden
-                            # Solo permitir si son de la misma subzona literal para evitar errores v4
-                            if order['subzona'] in r_subzones:
-                                score += 500
-                            else:
-                                score += 8000 # Muy penalizado si no hay datos espaciales ni subzona match
-
-
-                        if score < best_score:
-                            best_score = score
-                            best_order = order
-                            best_receiver = r
-
-                if best_order and best_receiver:
-                    dist_str = "N/A"
-                    if best_receiver in tech_locations and best_order['lat'] != 0:
-                        centroid = get_centroid(tech_locations[best_receiver])
-                        dist_km = haversine(best_order['lat'], best_order['lon'],
-                                          centroid[0], centroid[1])
-                        dist_str = f"{dist_km:.2f} km"
-
-                    alerta = ""
-                    o_start, o_end = parse_franja_hours(best_order['franja'])
-                    if o_start is not None and o_start >= 14.5:
-                        alerta = "Franja Tarde"
-                    if o_end is not None:
-                        active_r = sum(1 for o in tech_all_orders.get(best_receiver, [])
-                                      if get_status_progress(o['status']) >= 1)
-                        est = CURRENT_HOUR + active_r * ORDER_DURATION_HOURS
-                        if est > o_start:
-                            alerta += " | Ajustado en tiempo"
-
-                    near_finish_tag = ""
-                    if tech_has_near_finish.get(best_receiver, False):
-                        near_finish_tag = " (por finalizar orden)"
+                
+                # Buscar receptor
+                for r in all_techs_in_zone:
+                    if r == donor: continue
+                    if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD: continue
+                    
+                    can_handle, reason = can_tech_handle_franja(
+                        tech_franja_counts.get(r, {}),
+                        tech_all_orders.get(r, []),
+                        order['franja'],
+                        CURRENT_HOUR
+                    )
+                    if not can_handle: continue
+                    
+                    # SCORING
+                    score = tech_total.get(r, 0) * 500
+                    
+                    # Distancia
+                    if order['lat'] != 0 and r in tech_locations:
+                        centroid = get_centroid(tech_locations[r])
+                        dist = haversine(order['lat'], order['lon'], centroid[0], centroid[1])
+                        if dist > MAX_ALLOWED_DISTANCE_KM: continue
+                        score += dist * 300
+                    
+                    # Subzona bonus
+                    if order['subzona'] in tech_subzones.get(r, set()):
+                        score -= 2000
+                    
+                    if score < best_score:
+                        best_score = score
+                        best_receiver = r
+                
+                if best_receiver:
+                    # Registrar sugerencia
+                    dist_km = 0
+                    if best_receiver in tech_locations and order['lat'] != 0:
+                        c = get_centroid(tech_locations[best_receiver])
+                        dist_km = haversine(order['lat'], order['lon'], c[0], c[1])
 
                     suggestions.append({
-                        'zona': z, 'subzona': best_order['subzona'],
-                        'origen': donor,
-                        'destino': best_receiver + near_finish_tag,
-                        'destino_raw': best_receiver,
-                        'order_id': best_order['order_id'],
-                        'status_orden': best_order['status'],
-                        'franja': best_order['franja'],
-                        'distancia_estimada': dist_str,
-                        'sector': best_order['sector'],
-                        'address': best_order.get('address', ''),
-                        'alerta': alerta,
-                        'carga_origen_antes': tech_total.get(donor, 0),
-                        'carga_destino_antes': tech_total.get(best_receiver, 0),
+                        'zona': z, 'subzona': order['subzona'],
+                        'origen': donor, 'destino': best_receiver,
+                        'order_id': order['order_id'], 'franja': order['franja'],
+                        'address': order.get('address', ''), 'distancia_estimada': f"{dist_km:.2f} km",
+                        'alerta': "Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar",
                         'pendientes_origen': tech_pending.get(donor, 0),
-                        'pendientes_destino': tech_pending.get(best_receiver, 0),
+                        'pendientes_destino': tech_pending.get(best_receiver, 0)
                     })
-
-                    # Actualizar contadores
+                    
+                    # Actualizar estados internos
                     if donor != "SIN_ASIGNAR":
                         tech_total[donor] -= 1
-                        tech_pending[donor] = max(0, tech_pending.get(donor, 1) - 1)
-
+                        tech_pending[donor] = max(0, tech_pending.get(donor, 0) - 1)
                     tech_total[best_receiver] = tech_total.get(best_receiver, 0) + 1
                     tech_pending[best_receiver] = tech_pending.get(best_receiver, 0) + 1
+                    
+                    if best_receiver not in tech_franja_counts: tech_franja_counts[best_receiver] = {}
+                    tech_franja_counts[best_receiver][order['franja']] = tech_franja_counts[best_receiver].get(order['franja'], 0) + 1
+                    
+                    if best_receiver not in tech_all_orders: tech_all_orders[best_receiver] = []
+                    tech_all_orders[best_receiver].append(order)
+                    
+                    donor_orders.remove(order)
+                    tech_movable[donor].remove(order)
+                    moved_count += 1
 
-                    if best_receiver not in tech_franja_counts:
-                        tech_franja_counts[best_receiver] = {}
-                    tech_franja_counts[best_receiver][best_order['franja']] = \
-                        tech_franja_counts[best_receiver].get(best_order['franja'], 0) + 1
-
-                    if best_order['lat'] != 0:
-                        if best_receiver not in tech_locations:
-                            tech_locations[best_receiver] = []
-                        tech_locations[best_receiver].append(
-                            (best_order['lat'], best_order['lon']))
-
-                    if best_receiver not in tech_subzones:
-                        tech_subzones[best_receiver] = set()
-                    tech_subzones[best_receiver].add(best_order['subzona'])
-
-                    # Agregar orden al registro del receptor
-                    if best_receiver not in tech_all_orders:
-                        tech_all_orders[best_receiver] = []
-                    tech_all_orders[best_receiver].append(best_order)
-
-                    donor_orders.remove(best_order)
+        # 3. INTERCAMBIOS (SWAPS) POR DISTANCIA (NUEVO)
+        # Solo entre tecnicos que ya tienen ordenes programadas
+        for t1 in sorted(all_techs_in_zone):
+            if t1 == "SIN_ASIGNAR" or not tech_movable.get(t1): continue
+            for t2 in sorted(all_techs_in_zone):
+                if t2 <= t1 or t2 == "SIN_ASIGNAR" or not tech_movable.get(t2): continue
+                
+                for o1 in list(tech_movable[t1]):
+                    for o2 in list(tech_movable[t2]):
+                        # Solo si son de la misma franja o franjas compatibles para no romper tiempos
+                        if o1['franja'] != o2['franja']: continue
+                        if o1['lat'] == 0 or o2['lat'] == 0: continue
+                        
+                        # Calcular distancias actuales vs cruzadas
+                        c1 = get_centroid(tech_locations.get(t1, [(0,0)]))
+                        c2 = get_centroid(tech_locations.get(t2, [(0,0)]))
+                        
+                        dist_actual = haversine(o1['lat'], o1['lon'], c1[0], c1[1]) + \
+                                      haversine(o2['lat'], o2['lon'], c2[0], c2[1])
+                        
+                        dist_swap = haversine(o1['lat'], o1['lon'], c2[0], c2[1]) + \
+                                    haversine(o2['lat'], o2['lon'], c1[0], c1[1])
+                        
+                        # Si el swap ahorra mas de 2km en total
+                        if dist_actual - dist_swap > 2.0:
+                            suggestions.append({
+                                'zona': z, 'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
+                                'origen': f"INTERCAMBIO: {t1} y {t2}",
+                                'destino': "Ver IDs Orden",
+                                'order_id': f"{o1['order_id']} <-> {o2['order_id']}",
+                                'franja': o1['franja'],
+                                'address': f"Swap para ahorrar {dist_actual-dist_swap:.1f} km",
+                                'distancia_estimada': "Optimo", 'alerta': "INTERCAMBIO",
+                                'pendientes_origen': tech_pending.get(t1, 0),
+                                'pendientes_destino': tech_pending.get(t2, 0)
+                            })
+                            # Remover de movibles para no volver a procesarlas
+                            tech_movable[t1].remove(o1)
+                            tech_movable[t2].remove(o2)
+                            break
 
     # ===========================================
     # GENERAR EXCEL

@@ -9,7 +9,7 @@ from datetime import datetime
 # --- CONFIGURACION ---
 # Defaults will be overridden inside functions for multi-user safety
 # (Removed static global filenames)
-CURRENT_HOUR = datetime.now().hour + datetime.now().minute / 60.0  # Hora actual decimal
+# CURRENT_HOUR will be calculated locally inside functions to ensure accuracy
 
 # Constraints
 MAX_IDEAL_LOAD = 5       # Carga ideal maxima por tecnico
@@ -258,8 +258,9 @@ def auto_fit_columns(ws):
 
 
 def generate_suggestions(input_file):
+    current_hour = datetime.now().hour + datetime.now().minute / 60.0
     print(f"Leyendo archivo: {input_file}")
-    print(f"Hora actual: {CURRENT_HOUR:.2f} ({datetime.now().strftime('%H:%M')})")
+    print(f"Hora actual: {current_hour:.2f} ({datetime.now().strftime('%H:%M')})")
 
     try:
         wb = openpyxl.load_workbook(input_file, read_only=True, data_only=True)
@@ -348,69 +349,72 @@ def generate_suggestions(input_file):
     zone_summaries = []
     subzone_summaries = []
 
-    for z in zones:
-        zone_data = [d for d in data if d['zona'] == z]
+    # ===========================================
+    # PASO 0: Calcular carga GLOBAL por tecnico
+    # ===========================================
+    tech_total = {}
+    tech_finalized = {}
+    tech_pending = {}
+    tech_movable = {}
+    tech_all_orders = {}
+    tech_locations = {}
+    tech_franja_counts = {}
+    tech_status_detail = {}
+    tech_subzones = {}
+    tech_has_near_finish = {}
+    tech_main_zone = {} # Para saber a que zona pertenece principalmente el reporte
 
-        # ===========================================
-        # PASO 1: Calcular carga por tecnico
-        # ===========================================
-        tech_total = {}
-        tech_finalized = {}
-        tech_pending = {}
-        tech_movable = {}
-        tech_all_orders = {}   # TODAS las ordenes del tecnico (para validaciones de tiempo)
-        tech_locations = {}
-        tech_franja_counts = {}
-        tech_status_detail = {}
-        tech_subzones = {}
-        tech_has_near_finish = {}  # Tecnico tiene orden a punto de terminar
-
-        for d in zone_data:
-            t = d['tech']
-            status_lower = d['status'].lower()
-
-            if t == "SIN_ASIGNAR":
-                if is_status(status_lower, MOVABLE_STATUSES):
-                    if t not in tech_movable: tech_movable[t] = []
-                    tech_movable[t].append(d)
-                continue
-
-            # Registrar TODAS las ordenes del tecnico
-            if t not in tech_all_orders: tech_all_orders[t] = []
-            tech_all_orders[t].append(d)
-
-            tech_total[t] = tech_total.get(t, 0) + 1
-
-            if is_status(status_lower, FINALIZED_STATUSES):
-                tech_finalized[t] = tech_finalized.get(t, 0) + 1
-            else:
-                tech_pending[t] = tech_pending.get(t, 0) + 1
-
-                if t not in tech_franja_counts: tech_franja_counts[t] = {}
-                tech_franja_counts[t][d['franja']] = tech_franja_counts[t].get(d['franja'], 0) + 1
-
-                if d['lat'] != 0 and d['lon'] != 0:
-                    if t not in tech_locations: tech_locations[t] = []
-                    tech_locations[t].append((d['lat'], d['lon']))
-
-                if t not in tech_subzones: tech_subzones[t] = set()
-                tech_subzones[t].add(d['subzona'])
-
-                if t not in tech_status_detail: tech_status_detail[t] = {}
-                tech_status_detail[t][d['status']] = tech_status_detail[t].get(d['status'], 0) + 1
-
-                # Detectar si tiene ordenes a punto de terminar
-                if is_status(status_lower, NEAR_FINISH_STATUSES):
-                    tech_has_near_finish[t] = True
-
+    for d in data:
+        t = d['tech']
+        status_lower = d['status'].lower()
+        if t == "SIN_ASIGNAR":
             if is_status(status_lower, MOVABLE_STATUSES):
                 if t not in tech_movable: tech_movable[t] = []
                 tech_movable[t].append(d)
+            continue
+
+        if t not in tech_all_orders: tech_all_orders[t] = []
+        tech_all_orders[t].append(d)
+        tech_total[t] = tech_total.get(t, 0) + 1
+        
+        # Asignar zona principal del tecnico (la primera que aparezca o la que tenga mas ordenes)
+        if t not in tech_main_zone and d['zona'] != "SIN_ZONA":
+            tech_main_zone[t] = d['zona']
+
+        if is_status(status_lower, FINALIZED_STATUSES):
+            tech_finalized[t] = tech_finalized.get(t, 0) + 1
+        else:
+            tech_pending[t] = tech_pending.get(t, 0) + 1
+            if t not in tech_franja_counts: tech_franja_counts[t] = {}
+            tech_franja_counts[t][d['franja']] = tech_franja_counts[t].get(d['franja'], 0) + 1
+            if d['lat'] != 0 and d['lon'] != 0:
+                if t not in tech_locations: tech_locations[t] = []
+                tech_locations[t].append((d['lat'], d['lon']))
+            if t not in tech_subzones: tech_subzones[t] = set()
+            tech_subzones[t].add(d['subzona'])
+            if is_status(status_lower, NEAR_FINISH_STATUSES):
+                tech_has_near_finish[t] = True
+
+        if is_status(status_lower, MOVABLE_STATUSES):
+            if t not in tech_movable: tech_movable[t] = []
+            tech_movable[t].append(d)
+
+    # Registro de tecnicos para inter-zona
+    inter_zone_moves_done = set() # Trackear tecnicos que ya ayudaron a otra zona o donaron?
+    # El requerimiento dice: "puede sugerir el movimiento de zona 1 sola vez".
+    # Entiendo que un DONANTE puede enviar UNA orden a otra zona si en la suya no hay nadie.
+    donors_interzone_count = {} 
+
+    for z in zones:
+        zone_data = [d for d in data if d['zona'] == z]
+        # Tecnicos que pertenecen a esta zona (para resumenes)
+        all_techs_in_zone = sorted(set(d['tech'] for d in zone_data if d['tech'] != "SIN_ASIGNAR"))
+        active_techs_in_zone = [t for t in all_techs_in_zone if tech_pending.get(t, 0) > 0 or tech_finalized.get(t,0) > 0]
 
         # ===========================================
         # PASO 2: Alertas de franja proxima a vencer
         # ===========================================
-        for t in tech_total:
+        for t in active_techs_in_zone:
             total = tech_total[t]
             pending = tech_pending.get(t, 0)
 
@@ -429,16 +433,18 @@ def generate_suggestions(input_file):
                 f_start, f_end = parse_franja_hours(d['franja'])
                 if f_start is not None:
                     # Cuantas ordenes tiene el tecnico antes de esta?
-                    active_now = sum(1 for o in tech_all_orders.get(t, [])
-                                    if get_status_progress(o['status']) >= 1)
+                    active_now_list = [o for o in tech_all_orders.get(t, []) if 1 <= get_status_progress(o['status']) < 6]
+                    active_now = len(active_now_list)
+                    rem_h = estimate_remaining_hours(active_now_list[0]['status']) if active_now_list else 0
+                    
                     prog_before = sum(1 for o in tech_all_orders.get(t, [])
                                      if is_status(o['status'].lower(), MOVABLE_STATUSES)
                                      and parse_franja_hours(o['franja'])[0] is not None
                                      and parse_franja_hours(o['franja'])[0] < f_start)
 
-
-                    # Riesgo MAXIMO (1.5h) para alertas
-                    max_est_ready = CURRENT_HOUR + (active_now + prog_before) * MAX_ORDER_DURATION_HOURS
+                    # Proyeccion normal (1.0h) y Riesgo MAXIMO (1.5h)
+                    est_ready = current_hour + rem_h + (prog_before * ORDER_DURATION_HOURS)
+                    max_est_ready = current_hour + rem_h + (prog_before * MAX_ORDER_DURATION_HOURS)
 
                     if f_end is not None and max_est_ready > f_end:
                         alerts.append({
@@ -448,7 +454,7 @@ def generate_suggestions(input_file):
                                       f"Con maximo de 1.5h por orden llegaria ~{max_est_ready:.1f}h. "
                                       f"Franja termina {f_end:.1f}h. Posible retraso."
                         })
-                    elif f_start is not None and max_est_ready > f_start and f_end and max_est_ready <= f_end:
+                    elif f_start is not None and est_ready > f_start and f_end and est_ready <= f_end:
                         alerts.append({
                             'tipo': 'FRANJA AJUSTADA',
                             'zona': z, 'tecnico': t,
@@ -477,7 +483,9 @@ def generate_suggestions(input_file):
         unassigned_orders = [d for d in zone_data if d['tech'] == "SIN_ASIGNAR" 
                             and is_status(d['status'].lower(), MOVABLE_STATUSES)]
 
-        initial_pending_total = sum(tech_pending.values())
+        initial_pending_total = sum(tech_pending.get(t, 0) for t in active_techs_in_zone)
+        initial_finalized_total = sum(tech_finalized.get(t, 0) for t in active_techs_in_zone)
+        zone_pends = [tech_pending.get(t, 0) for t in active_techs_in_zone]
         
         current_zone_summary = {
             'zona': z,
@@ -486,10 +494,10 @@ def generate_suggestions(input_file):
             'pendientes_final': initial_pending_total, # Se actualizara en Paso 5
             'sin_asignar_inicial': len(unassigned_orders),
             'sin_asignar_final': len(unassigned_orders),  # Se actualizara en Paso 5
-            'total_finalizadas': sum(tech_finalized.get(t, 0) for t in tech_total),
+            'total_finalizadas': initial_finalized_total,
             'avg_inicial': round(float(initial_pending_total) / len(active_techs_in_zone), 1) if active_techs_in_zone else 0.0,
-            'min_inicial': min(tech_pending.values()) if tech_pending else 0,
-            'max_inicial': max(tech_pending.values()) if tech_pending else 0,
+            'min_inicial': min(zone_pends) if zone_pends else 0,
+            'max_inicial': max(zone_pends) if zone_pends else 0,
         }
         zone_summaries.append(current_zone_summary)
 
@@ -527,17 +535,16 @@ def generate_suggestions(input_file):
         # ===========================================
         # PASO 5: NIVELACION INTELIGENTE (Mejorada v6)
         # ===========================================
-        all_techs_in_zone = set(tech_total.keys())
-
         # 1. DETECTAR DONANTES POR RIESGO, CARGA O DESBALANCE
         donors = []
         
-        # A) SIN_ASIGNAR (Siempre donante)
-        if "SIN_ASIGNAR" in tech_movable and tech_movable["SIN_ASIGNAR"]:
+        # A) SIN_ASIGNAR de esta zona
+        unassigned_in_zone = [d for d in tech_movable.get("SIN_ASIGNAR", []) if d['zona'] == z]
+        if unassigned_in_zone:
             donors.append("SIN_ASIGNAR")
 
         # B) Tecnicos con carga excesiva o por encima del promedio del equipo
-        avg_zone_pending = sum(tech_pending.values()) / len(active_techs_in_zone) if active_techs_in_zone else 0
+        avg_zone_pending = sum(tech_pending.get(t, 0) for t in active_techs_in_zone) / len(active_techs_in_zone) if active_techs_in_zone else 0
         
         for t in sorted(all_techs_in_zone):
             if t == "SIN_ASIGNAR": continue
@@ -567,7 +574,7 @@ def generate_suggestions(input_file):
                                      and parse_franja_hours(o['franja'])[0] is not None
                                      and parse_franja_hours(o['franja'])[0] < f_start)
                     
-                    est_ready = CURRENT_HOUR + rem_h + (prog_before * ORDER_DURATION_HOURS)
+                    est_ready = current_hour + rem_h + (prog_before * ORDER_DURATION_HOURS)
                     
                     if f_end is not None and est_ready > (f_end + 0.1): # Riesgo detectado
                         if t not in donors: donors.append(t)
@@ -575,7 +582,11 @@ def generate_suggestions(input_file):
 
         # 2. PROCESAR MOVIMIENTOS SIMPLES
         for donor in donors:
-            donor_orders = list(tech_movable.get(donor, []))
+            if donor == "SIN_ASIGNAR":
+                donor_orders = [d for d in tech_movable.get("SIN_ASIGNAR", []) if d['zona'] == z]
+            else:
+                donor_orders = list(tech_movable.get(donor, []))
+            
             if not donor_orders: continue
             
             # Ordenar por franja (priorizar AM para moverlas si hay riesgo)
@@ -592,39 +603,50 @@ def generate_suggestions(input_file):
             for order in list(donor_orders):
                 if moved_count >= moves_limit: break
                 
+                # Buscar receptor - Primero en la misma zona
                 best_receiver = None
                 best_score = float('inf')
-                
-                # Buscar receptor
-                for r in all_techs_in_zone:
-                    if r == donor: continue
-                    if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD: continue
+                # Buscar mejor receptor (mismo algoritmo para Interno y Fallback Externo)
+                for pass_num in [1, 2]: # Pass 1: Local, Pass 2: Externo
+                    if best_receiver: break
                     
-                    can_handle, reason = can_tech_handle_franja(
-                        tech_franja_counts.get(r, {}),
-                        tech_all_orders.get(r, []),
-                        order['franja'],
-                        CURRENT_HOUR
-                    )
-                    if not can_handle: continue
+                    if pass_num == 1:
+                        recipients = [r for r in all_techs_in_zone if r != donor]
+                    else:
+                        if donors_interzone_count.get(donor, 0) >= 1: break
+                        recipients = [t for t in tech_total if t not in all_techs_in_zone and t != donor and t != "SIN_ASIGNAR"]
+
+                    for r in recipients:
+                        if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD: continue
+                        
+                        can_handle, reason = can_tech_handle_franja(
+                            tech_franja_counts.get(r, {}),
+                            tech_all_orders.get(r, []),
+                            order['franja'],
+                            current_hour
+                        )
+                        if not can_handle: continue
+                        
+                        # SCORING
+                        score = tech_total.get(r, 0) * 500
+                        
+                        # Distancia
+                        if order['lat'] != 0 and r in tech_locations:
+                            centroid = get_centroid(tech_locations[r])
+                            dist = haversine(order['lat'], order['lon'], centroid[0], centroid[1])
+                            if dist > MAX_ALLOWED_DISTANCE_KM: continue
+                            score += dist * 300
+                        
+                        # Subzona bonus
+                        if order['subzona'] in tech_subzones.get(r, set()):
+                            score -= 2000
+                        
+                        if score < best_score:
+                            best_score = score
+                            best_receiver = r
                     
-                    # SCORING
-                    score = tech_total.get(r, 0) * 500
-                    
-                    # Distancia
-                    if order['lat'] != 0 and r in tech_locations:
-                        centroid = get_centroid(tech_locations[r])
-                        dist = haversine(order['lat'], order['lon'], centroid[0], centroid[1])
-                        if dist > MAX_ALLOWED_DISTANCE_KM: continue
-                        score += dist * 300
-                    
-                    # Subzona bonus
-                    if order['subzona'] in tech_subzones.get(r, set()):
-                        score -= 2000
-                    
-                    if score < best_score:
-                        best_score = score
-                        best_receiver = r
+                    if pass_num == 2 and best_receiver:
+                        donors_interzone_count[donor] = donors_interzone_count.get(donor, 0) + 1
                 
                 if best_receiver:
                     # Registrar sugerencia
@@ -633,12 +655,14 @@ def generate_suggestions(input_file):
                         c = get_centroid(tech_locations[best_receiver])
                         dist_km = haversine(order['lat'], order['lon'], c[0], c[1])
 
+                    is_interzone = tech_main_zone.get(best_receiver) != z
                     suggestions.append({
-                        'zona': z, 'subzona': order['subzona'],
+                        'zona': f"{z} (AYUDA EXTERNA)" if is_interzone else z,
+                        'subzona': order['subzona'],
                         'origen': donor, 'destino': best_receiver,
                         'order_id': order['order_id'], 'franja': order['franja'],
                         'address': order.get('address', ''), 'distancia_estimada': f"{dist_km:.2f} km",
-                        'alerta': "Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar",
+                        'alerta': f"Inter-Zona ({tech_main_zone.get(best_receiver)})" if is_interzone else "Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar",
                         'pendientes_origen': tech_pending.get(donor, 0),
                         'pendientes_destino': tech_pending.get(best_receiver, 0)
                     })
@@ -782,7 +806,7 @@ def generate_suggestions(input_file):
 
     for sug in suggestions:
         row_num = ws_sug.max_row + 1
-        addr = sug.get('address', '') or sug['sector']
+        addr = sug.get('address', '') or sug.get('subzona', '')
         ws_sug.append([
             sug['zona'], sug['subzona'], addr,
             sug['origen'], sug['pendientes_origen'],
@@ -843,6 +867,7 @@ def generate_suggestions(input_file):
 
 
 if __name__ == "__main__":
+    current_hour = datetime.now().hour + datetime.now().minute / 60.0
     f = get_latest_preruta_file()
     if f:
         msg, path = generate_suggestions(f)

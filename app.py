@@ -4,10 +4,17 @@ import sys
 import uuid
 
 # Import core logic
+print("Iniciando importacion de sugerir_nivelacion...")
 sys.path.append(os.getcwd())
-import sugerir_nivelacion
+try:
+    import sugerir_nivelacion
+    print("Importacion completada exitosamente.")
+except Exception as e:
+    print(f"ERROR CRITICO al importar sugerir_nivelacion: {str(e)}")
+    raise
 
 app = Flask(__name__)
+print(f"Aplicacion Flask instanciada. PORT: {os.environ.get('PORT', '5000 (default)')}")
 
 # Almacén temporal para el último reporte (solo para esta sesión)
 Params = {

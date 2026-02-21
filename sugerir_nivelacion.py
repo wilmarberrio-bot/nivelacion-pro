@@ -457,10 +457,10 @@ def generate_suggestions(input_file):
             tech_movable[t].append(d)
 
     # Registro de tecnicos para inter-zona
-    inter_zone_moves_done = set() # Trackear tecnicos que ya ayudaron a otra zona o donaron?
-    # El requerimiento dice: "puede sugerir el movimiento de zona 1 sola vez".
+    # El requerimiento dice: "se puede sugerir el movimiento de zona 1 sola vez".
     # Entiendo que un DONANTE puede enviar UNA orden a otra zona si en la suya no hay nadie.
     donors_interzone_count = {} 
+    techs_moved_from_zone = set() # Tecnicos que ya han sido movidos fuera de su zona de origen
 
     for z in zones:
         zone_data = [d for d in data if d['zona'] == z]
@@ -647,6 +647,14 @@ def generate_suggestions(input_file):
                         if t not in donors: donors.append(t)
                         break
 
+        # 1.1 Verificación de capacidad en origen (NO mover si la zona queda desprotegida)
+        # Solo aplica para movimientos HACIA AFUERA de la zona z
+        def has_zone_capacity(zone_name):
+            techs_in_z = [t for t, mz in tech_main_zone.items() if mz == zone_name]
+            # Si solo queda 1 técnico, no lo movemos a menos que sea estrictamente necesario (ej. 0 órdenes locales)
+            active_now = sum(1 for t in techs_in_z if t not in techs_moved_from_zone)
+            return active_now > 1
+
         # 2. PROCESAR MOVIMIENTOS SIMPLES
         for donor in donors:
             if donor == "SIN_ASIGNAR":
@@ -710,6 +718,14 @@ def generate_suggestions(input_file):
                         )
                         if not can_handle: continue
                         
+                        # --- VALIDACIÓN NUEVA: Capacidad en Origen para Inter-Zona ---
+                        is_it_interzone = tech_main_zone.get(r) != z
+                        if is_it_interzone:
+                            # 1. Solo un movimiento inter-zona por técnico
+                            if donor in techs_moved_from_zone: continue
+                            # 2. La zona origen debe tener otros técnicos para soporte
+                            if not has_zone_capacity(z): continue
+
                         # SCORING
                         score = tech_total.get(r, 0) * 500
                         
@@ -730,6 +746,7 @@ def generate_suggestions(input_file):
                     
                     if pass_num == 2 and best_receiver:
                         donors_interzone_count[donor] = donors_interzone_count.get(donor, 0) + 1
+                        techs_moved_from_zone.add(donor) # Marcamos que este técnico sale de su zona
                 
                 if best_receiver:
                     # Registrar sugerencia
@@ -747,7 +764,8 @@ def generate_suggestions(input_file):
                         'address': order.get('address', ''), 'distancia_estimada': f"{dist_km:.2f} km",
                         'alerta': f"Inter-Zona ({tech_main_zone.get(best_receiver)})" if is_interzone else "Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar",
                         'pendientes_origen': tech_pending.get(donor, 0),
-                        'pendientes_destino': tech_pending.get(best_receiver, 0)
+                        'pendientes_destino': tech_pending.get(best_receiver, 0),
+                        'justificacion': "Carga local redistribuida" if is_interzone and donor != "SIN_ASIGNAR" else ""
                     })
                     
                     # Actualizar estados internos
@@ -778,6 +796,53 @@ def generate_suggestions(input_file):
             # Consideramos solo a los tecnicos de esta zona para el desbalance
             final_pends = [tech_pending.get(t, 0) for t in active_techs_in_zone]
             current_zone_summary['desbalance_final'] = max(final_pends) - min(final_pends)
+            
+            # --- APOYO PROACTIVO (Nuevo v7) ---
+            # Si todos en esta zona tienen carga óptima, ofrecer apoyo a la zona vecina más cargada
+            if all(tech_pending.get(t, 0) <= 3 for t in active_techs_in_zone) and active_techs_in_zone:
+                neighbors = ZONE_ADJACENCY.get(z.upper(), [])
+                saturada = None
+                max_load = -1
+                for n_zone in neighbors:
+                    # Estimar carga de la zona vecina
+                    other_techs = [t for t, mz in tech_main_zone.items() if mz.upper() == n_zone]
+                    if not other_techs: continue
+                    other_avg = sum(tech_pending.get(t, 0) for t in other_techs) / len(other_techs)
+                    if other_avg > 4 and other_avg > max_load:
+                        max_load = other_avg
+                        saturada = n_zone
+                
+                if saturada:
+                    # Mover al técnico con menos carga proactivamente
+                    pro_donor = min(active_techs_in_zone, key=lambda t: tech_pending.get(t, 0))
+                    if pro_donor not in techs_moved_from_zone:
+                        # Buscamos una orden unassigned en la zona saturada o simplemente avisamos
+                        # Para este script, buscaremos una orden 'SIN_ASIGNAR' en la zona destino
+                        target_orders = [d for d in tech_movable.get("SIN_ASIGNAR", []) if d['zona'].upper() == saturada]
+                        if target_orders:
+                            order = target_orders[0]
+                            dist_km = 0
+                            if pro_donor in tech_locations and order['lat'] != 0:
+                                c = get_centroid(tech_locations[pro_donor])
+                                dist_km = haversine(order['lat'], order['lon'], c[0], c[1])
+
+                            if dist_km <= MAX_ALLOWED_DISTANCE_KM:
+                                suggestions.append({
+                                    'zona': f"{saturada} (APOYO PROACTIVO)",
+                                    'subzona': order['subzona'],
+                                    'origen': pro_donor, 'destino': "SIN_ASIGNAR (Destino)", # En el destino se le asignará
+                                    'order_id': order['order_id'], 'franja': order['franja'],
+                                    'address': order.get('address', ''), 'distancia_estimada': f"{dist_km:.2f} km",
+                                    'alerta': "Apoyo Proactivo",
+                                    'pendientes_origen': tech_pending.get(pro_donor, 0),
+                                    'pendientes_destino': 99, # Representa alta carga
+                                    'justificacion': f"Zona {z} en carga optima. Apoyo a {saturada} por saturacion."
+                                })
+                                techs_moved_from_zone.add(pro_donor)
+                                # Actualizamos localmente para no repetir
+                                tech_pending[pro_donor] += 1
+                                tech_total[pro_donor] += 1
+                                tech_movable.get("SIN_ASIGNAR", []).remove(order)
         else:
             current_zone_summary['desbalance_final'] = 0
 
@@ -818,16 +883,28 @@ def generate_suggestions(input_file):
                     dist1_swap = haversine(o1['lat'], o1['lon'], c2[0], c2[1])
                     dist2_swap = haversine(o2['lat'], o2['lon'], c1[0], c1[1])
                     
-                    # Si el swap ahorra mas de 1.5km en total (Ajustado para evitar swaps marginales inter-zona)
-                    if (dist1_actual + dist2_actual) - (dist1_swap + dist2_swap) > 1.5:
+                    # Ahorro de distancia total
+                    total_saved = (dist1_actual + dist2_actual) - (dist1_swap + dist2_swap)
+                    
+                    # Umbral diferenciado: mas sensible en la misma zona para optimizar subzonas
+                    is_same_zone = (z1 == z2)
+                    threshold = 0.5 if is_same_zone else 1.5
+                    
+                    # Bonus por Subzona: si el swap hace que ambos queden en una subzona que ya tienen
+                    subzone_bonus = 0
+                    if is_same_zone:
+                        if o1['subzona'] in tech_subzones.get(t2, set()) and o2['subzona'] in tech_subzones.get(t1, set()):
+                            subzone_bonus = 1.0 # Equivalente a ahorrar 1km extra
+
+                    if (total_saved + subzone_bonus) > threshold:
                         suggestions.append({
-                            'zona': z1 if z1 == z2 else f"{z1} <-> {z2}",
+                            'zona': z1 if is_same_zone else f"{z1} <-> {z2}",
                             'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
                             'origen': f"INTERCAMBIO: {t1} y {t2}",
                             'destino': "Intercambio de Ordenes",
                             'order_id': f"{o1['order_id']} <-> {o2['order_id']}",
                             'franja': o1['franja'],
-                            'address': f"Swap para ahorrar {(dist1_actual + dist2_actual) - (dist1_swap + dist2_swap):.1f} km",
+                            'address': f"Swap para ahorrar {total_saved:.1f} km" + (" (Mejor Subzona)" if subzone_bonus > 0 else ""),
                             'distancia_estimada': "Optimo", 'alerta': "INTERCAMBIO",
                             'pendientes_origen': tech_pending.get(t1, 0),
                             'pendientes_destino': tech_pending.get(t2, 0)
@@ -891,12 +968,12 @@ def generate_suggestions(input_file):
 
     auto_fit_columns(ws_sub)
 
-    # --- HOJA 3: Sugerencias ---
+    # --- HO_A 3: Sugerencias ---
     ws_sug = wb_out.create_sheet("Sugerencias de Movimientos")
     sugh = [
         'Zona', 'Subzona', 'Direccion', 'De Tecnico (Origen)',
         'Pendientes Origen', 'A Tecnico (Destino)', 'Pendientes Destino',
-        'ID Orden', 'Franja', 'Distancia Aprox.', 'Alerta'
+        'ID Orden', 'Franja', 'Distancia Aprox.', 'Alerta', 'Justificación'
     ]
     ws_sug.append(sugh)
     style_header_row(ws_sug, len(sugh))
@@ -909,7 +986,8 @@ def generate_suggestions(input_file):
             sug['origen'], sug['pendientes_origen'],
             sug['destino'], sug['pendientes_destino'],
             sug['order_id'], sug['franja'],
-            sug['distancia_estimada'], sug['alerta']
+            sug['distancia_estimada'], sug['alerta'],
+            sug.get('justificacion', '')
         ])
         if sug['alerta']:
             ws_sug.cell(row=row_num, column=11).fill = WARN_FILL

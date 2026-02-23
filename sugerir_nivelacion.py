@@ -292,8 +292,11 @@ def auto_fit_columns(ws):
         ws.column_dimensions[col_letter].width = min(max_len + 4, 55)
 
 
-def generate_suggestions(input_file):
-    current_hour = datetime.now().hour + datetime.now().minute / 60.0
+def generate_suggestions(input_file, forced_hour=None):
+    if forced_hour is not None:
+        current_hour = forced_hour
+    else:
+        current_hour = datetime.now().hour + datetime.now().minute / 60.0
     print(f"Leyendo archivo: {input_file}")
     print(f"Hora actual: {current_hour:.2f} ({datetime.now().strftime('%H:%M')})")
 
@@ -725,6 +728,21 @@ def generate_suggestions(input_file):
                             if donor in techs_moved_from_zone: continue
                             # 2. La zona origen debe tener otros técnicos para soporte
                             if not has_zone_capacity(z): continue
+                            
+                            # 3. RESTRICCIÓN AM (Nuevo v7): Evitar movimientos inter-zona en la mañana
+                            # a menos que el desbalance sea muy crítico.
+                            if current_hour < 12.0:
+                                # Estimar promedios de ambas zonas
+                                target_zone = tech_main_zone.get(r)
+                                target_techs = [t for t, mz in tech_main_zone.items() if mz == target_zone]
+                                source_techs = [t for t, mz in tech_main_zone.items() if mz == z]
+                                
+                                target_avg = sum(tech_pending.get(t, 0) for t in target_techs) / len(target_techs) if target_techs else 0
+                                source_avg = sum(tech_pending.get(t, 0) for t in source_techs) / len(source_techs) if source_techs else 0
+
+                                # Solo si la zona destino está más cargada (>0.2 de diferencia en promedio)
+                                if (target_avg - source_avg) < 0.2:
+                                    continue # No mover en AM si no hay un desnivel claro
 
                         # SCORING
                         score = tech_total.get(r, 0) * 500
@@ -765,7 +783,7 @@ def generate_suggestions(input_file):
                         'alerta': f"Inter-Zona ({tech_main_zone.get(best_receiver)})" if is_interzone else "Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar",
                         'pendientes_origen': tech_pending.get(donor, 0),
                         'pendientes_destino': tech_pending.get(best_receiver, 0),
-                        'justificacion': "Carga local redistribuida" if is_interzone and donor != "SIN_ASIGNAR" else ""
+                        'justificacion': "Carga local redistribuida" if is_interzone and donor != "SIN_ASIGNAR" else "Balanceo crítico AM" if is_interzone and current_hour < 12.0 else ""
                     })
                     
                     # Actualizar estados internos
@@ -888,7 +906,7 @@ def generate_suggestions(input_file):
                     
                     # Umbral diferenciado: mas sensible en la misma zona para optimizar subzonas
                     is_same_zone = (z1 == z2)
-                    threshold = 0.5 if is_same_zone else 1.5
+                    threshold = 0.5 if is_same_zone else 2.0 # Ajustado para balancear utilidad y ahorro real
                     
                     # Bonus por Subzona: si el swap hace que ambos queden en una subzona que ya tienen
                     subzone_bonus = 0

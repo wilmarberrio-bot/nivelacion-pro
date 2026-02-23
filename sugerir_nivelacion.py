@@ -151,19 +151,25 @@ def get_status_progress(status):
     return 0
 
 
-def estimate_remaining_hours(status):
-    """Estima cuántas horas le quedan a la orden actual basado en su progreso."""
+def estimate_remaining_hours(status, onsite_hour=None, current_hour=None):
+    """Estima cuántas horas le quedan a la orden actual basado en su progreso y hora de arribo."""
     progress = get_status_progress(status)
-    # Si ya empezó pero no ha avanzado mucho, le queda el total (1.25h)
-    # Si está en 'mac principal', le queda poco (0.4h)
-    # Si está en 'dispositivos cargados', está terminando (0.1h)
-    if progress == 0: return ORDER_DURATION_HOURS
-    if progress == 1: return ORDER_DURATION_HOURS # Inbound
-    if progress == 2: return ORDER_DURATION_HOURS # En sitio
-    if progress == 3: return 0.6 # Iniciado (ajustado de 0.8 para base 1.0h)
-    if progress == 4: return 0.3 # Mac principal (ajustado de 0.4)
-    if progress >= 5: return 0.1 # Dispositivos cargados
-    return ORDER_DURATION_HOURS
+    
+    # Duración base esperada según estado
+    base_duration = ORDER_DURATION_HOURS
+    if progress == 3: base_duration = 0.6  # Iniciado
+    if progress == 4: base_duration = 0.3  # Mac principal
+    if progress >= 5: base_duration = 0.1  # Dispositivos cargados
+    
+    # Si tenemos hora de arribo, ajustamos según el tiempo transcurrido
+    if onsite_hour is not None and current_hour is not None:
+        elapsed = current_hour - onsite_hour
+        if elapsed > 0:
+            # Si ya pasó más tiempo del esperado, asumimos que le queda muy poco (0.1h)
+            remaining = max(0.1, base_duration - elapsed)
+            return remaining
+            
+    return base_duration
 
 
 def count_duplicated_slots(franja_counts):
@@ -321,6 +327,7 @@ def generate_suggestions(input_file, forced_hour=None):
     idx_lat = get_col_index(headers, ['Latitude', 'Latitud', 'lat'])
     idx_lon = get_col_index(headers, ['Longitude', 'Longitud', 'lon', 'lng'])
     idx_address = get_col_index(headers, ['Addresses__address', 'Direccion', 'direccion'])
+    idx_onsite = get_col_index(headers, ['onsite_at_cot'])
 
     missing = []
     if idx_tech == -1: missing.append("Tecnico")
@@ -365,11 +372,17 @@ def generate_suggestions(input_file, forced_hour=None):
         if idx_address != -1 and row[idx_address]:
             address = str(row[idx_address]).strip()
 
+        onsite_dt = row[idx_onsite] if idx_onsite != -1 else None
+        onsite_hour = None
+        if onsite_dt and isinstance(onsite_dt, datetime):
+            onsite_hour = onsite_dt.hour + onsite_dt.minute / 60.0
+
         data.append({
             'tech': tech, 'zona': zona, 'subzona': subzona,
             'order_id': order_id, 'status': status, 'franja': franja,
             'lat': lat, 'lon': lon, 'address': address,
-            'sector': coords_to_sector(lat, lon, subzona)
+            'sector': coords_to_sector(lat, lon, subzona),
+            'onsite_hour': onsite_hour
         })
 
     wb.close()
@@ -485,48 +498,72 @@ def generate_suggestions(input_file, forced_hour=None):
                     'detalle': f"Tiene {total} ordenes totales (max: {MAX_ABSOLUTE_LOAD})"
                 })
 
+            # Alerta: Múltiples órdenes abiertas (En sitio o más avanzado)
+            all_tech_orders = tech_all_orders.get(t, [])
+            active_conflicts = [o for o in all_tech_orders if get_status_progress(o['status']) >= 2]
+            if len(active_conflicts) > 1:
+                ids = [str(o['order_id']) for o in active_conflicts]
+                alerts.append({
+                    'tipo': 'MULTI-ESTADO ACTIVO',
+                    'zona': z, 'tecnico': t,
+                    'detalle': f"El técnico tiene {len(active_conflicts)} órdenes activas simultáneamente: {', '.join(ids)}. "
+                              f"Solo debe tener una abierta para no afectar métricas."
+                })
+
             # Alertas de franjas proximas a vencer
-            for d in tech_all_orders.get(t, []):
-                if not is_status(d['status'].lower(), MOVABLE_STATUSES):
-                    continue  # Solo alertar programadas, las activas ya estan atendiendose
+            all_tech_orders = tech_all_orders.get(t, [])
+            # Separar activas y programadas
+            active_list = [o for o in all_tech_orders if 1 <= get_status_progress(o['status']) < 6]
+            movable_list = sorted([o for o in all_tech_orders if is_status(o['status'].lower(), MOVABLE_STATUSES)],
+                                 key=lambda x: parse_franja_hours(x['franja'])[0] if parse_franja_hours(x['franja'])[0] is not None else 0)
 
+            # Proyección base
+            proj_normal = current_hour
+            proj_max = current_hour
+            calc_base = f"Hora {format_hour(current_hour)}"
+
+            if active_list:
+                o_act = active_list[0]
+                rem_n = estimate_remaining_hours(o_act['status'], o_act.get('onsite_hour'), current_hour)
+                rem_m = rem_n * (MAX_ORDER_DURATION_HOURS / ORDER_DURATION_HOURS) if ORDER_DURATION_HOURS > 0 else rem_n
+                proj_normal += rem_n
+                proj_max += rem_m
+                calc_base += f" + {rem_n:.1f}h actual ({o_act['status']})"
+
+            for d in movable_list:
                 f_start, f_end = parse_franja_hours(d['franja'])
-                if f_start is not None:
-                    # Cuantas ordenes tiene el tecnico antes de esta?
-                    active_now_list = [o for o in tech_all_orders.get(t, []) if 1 <= get_status_progress(o['status']) < 6]
-                    active_now = len(active_now_list)
-                    rem_h = estimate_remaining_hours(active_now_list[0]['status']) if active_now_list else 0
-                    
-                    prog_before = sum(1 for o in tech_all_orders.get(t, [])
-                                     if is_status(o['status'].lower(), MOVABLE_STATUSES)
-                                     and parse_franja_hours(o['franja'])[0] is not None
-                                     and parse_franja_hours(o['franja'])[0] < f_start)
+                if f_start is None: continue
 
-                    # Proyeccion normal (1.0h) y Riesgo MAXIMO (1.5h)
-                    est_ready = current_hour + rem_h + (prog_before * ORDER_DURATION_HOURS)
-                    max_est_ready = current_hour + rem_h + (prog_before * MAX_ORDER_DURATION_HOURS)
+                # El técnico no empieza la siguiente hasta que la franja inicie (o cuando termine la anterior)
+                arrival_normal = max(proj_normal, f_start)
+                arrival_max = max(proj_max, f_start)
+                
+                # Proyección de cuándo terminaría está orden para la siguiente
+                proj_normal = arrival_normal + ORDER_DURATION_HOURS
+                proj_max = arrival_max + MAX_ORDER_DURATION_HOURS
 
-                    if f_end is not None and max_est_ready > f_end:
-                        t_now = format_hour(current_hour)
-                        t_ready = format_hour(max_est_ready)
-                        t_end = format_hour(f_end)
-                        alerts.append({
-                            'tipo': 'FRANJA EN RIESGO',
-                            'zona': z, 'tecnico': t,
-                            'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
-                                      f"Llegaría ~{t_ready} (según carga actual). "
-                                      f"Franja termina {t_end}. [Calculo: Hora {t_now} + "
-                                      f"{rem_h:.1f}h activa + {prog_before} ord. previas x {MAX_ORDER_DURATION_HOURS}h]"
-                        })
-                    elif f_start is not None and est_ready > f_start and f_end and est_ready <= f_end:
-                        t_ready = format_hour(est_ready)
-                        t_start = format_hour(f_start)
-                        alerts.append({
-                            'tipo': 'FRANJA AJUSTADA',
-                            'zona': z, 'tecnico': t,
-                            'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
-                                      f"Llegaría ~{t_ready} (Franja inicia {t_start}). Justo a tiempo."
-                        })
+                if f_end is not None and arrival_max > f_end:
+                    t_ready = format_hour(arrival_max)
+                    t_end = format_hour(f_end)
+                    alerts.append({
+                        'tipo': 'FRANJA EN RIESGO',
+                        'zona': z, 'tecnico': t,
+                        'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
+                                  f"Arribo proyectado ~{t_ready} (Límite {t_end}). "
+                                  f"Cálculo: {calc_base} -> Disponible para esta: {format_hour(arrival_max)}."
+                    })
+                elif f_start is not None and arrival_normal > f_start and f_end and arrival_normal <= f_end:
+                    t_ready = format_hour(arrival_normal)
+                    t_start = format_hour(f_start)
+                    alerts.append({
+                        'tipo': 'FRANJA AJUSTADA',
+                        'zona': z, 'tecnico': t,
+                        'detalle': f"Orden {d['order_id']} (Franja {d['franja']}) - "
+                                  f"Arribo proyectado ~{t_ready} (Inicia {t_start}). Justo a tiempo."
+                    })
+                
+                # Actualizar calc_base para la siguiente orden en el bucle
+                calc_base = f"Termina anterior {format_hour(proj_normal)}"
 
             # Alertas de franjas duplicadas existentes
             if t in tech_franja_counts:

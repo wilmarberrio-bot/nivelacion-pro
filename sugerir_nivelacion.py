@@ -5,6 +5,15 @@ from openpyxl.utils import get_column_letter
 import os
 import glob
 from datetime import datetime
+try:
+    import pytz
+    TZ_BOGOTA = pytz.timezone('America/Bogota')
+    def now_bogota():
+        return datetime.now(TZ_BOGOTA)
+except ImportError:
+    # Fallback si pytz no está instalado
+    def now_bogota():
+        return datetime.now()
 
 # --- CONFIGURACION ---
 # Defaults will be overridden inside functions for multi-user safety
@@ -299,12 +308,13 @@ def auto_fit_columns(ws):
 
 
 def generate_suggestions(input_file, forced_hour=None):
+    _now = now_bogota()
     if forced_hour is not None:
         current_hour = forced_hour
     else:
-        current_hour = datetime.now().hour + datetime.now().minute / 60.0
+        current_hour = _now.hour + _now.minute / 60.0
     print(f"Leyendo archivo: {input_file}")
-    print(f"Hora actual: {current_hour:.2f} ({datetime.now().strftime('%H:%M')})")
+    print(f"Hora actual (COL): {current_hour:.2f} ({_now.strftime('%H:%M')} America/Bogota)")
 
     try:
         wb = openpyxl.load_workbook(input_file, read_only=True, data_only=True)
@@ -398,7 +408,7 @@ def generate_suggestions(input_file, forced_hour=None):
     # Detectar si es Sabado o turno corto (solo 2 franjas de mañana)
     # Se considera sabado si hay 2 franjas o menos en total
     unique_franjas = sorted(list(set(d['franja'] for d in data if d['franja'] != 'Sin Franja')))
-    is_saturday_shift = (len(unique_franjas) <= 2) or (datetime.now().weekday() == 5)
+    is_saturday_shift = (len(unique_franjas) <= 2) or (_now.weekday() == 5)
     
     global MAX_IDEAL_LOAD, MAX_ABSOLUTE_LOAD, ORDER_DURATION_HOURS, MAX_ORDER_DURATION_HOURS
     
@@ -606,35 +616,42 @@ def generate_suggestions(input_file, forced_hour=None):
         zone_summaries.append(current_zone_summary)
 
         # ===========================================
-        # PASO 4: Resumen por Subzona (tabla dinamica)
+        # PASO 4: Resumen por Técnico (vista consolidada por técnico)
         # ===========================================
-        # Incluir ordenes con tecnico
+        # Una fila por técnico: muestra todas sus subzonas y estados juntos.
         active_zone_pending_data = [d for d in zone_data
                                    if not is_status(d['status'].lower(), FINALIZED_STATUSES)]
 
-        subzones_in_zone = sorted(set(d['subzona'] for d in active_zone_pending_data))
+        # Agrupar por tecnico
+        tech_subzone_map = {}  # tecnico -> { subzona -> { status -> count } }
+        for d in active_zone_pending_data:
+            t = d['tech']
+            sz = d['subzona']
+            st = d['status']
+            if t not in tech_subzone_map:
+                tech_subzone_map[t] = {}
+            if sz not in tech_subzone_map[t]:
+                tech_subzone_map[t][sz] = {}
+            tech_subzone_map[t][sz][st] = tech_subzone_map[t][sz].get(st, 0) + 1
 
-        for sz in subzones_in_zone:
-            sz_data = [d for d in active_zone_pending_data if d['subzona'] == sz]
-            sz_tech_detail = {}
-
-            for d in sz_data:
-                t = d['tech']
-                if t not in sz_tech_detail:
-                    sz_tech_detail[t] = {'total': 0, 'estados': {}}
-                sz_tech_detail[t]['total'] += 1
-                sz_tech_detail[t]['estados'][d['status']] = \
-                    sz_tech_detail[t]['estados'].get(d['status'], 0) + 1
-
-            for t, info in sorted(sz_tech_detail.items()):
-                breakdown = ", ".join([f"{k}: {v}" for k, v in info['estados'].items()])
-                subzone_summaries.append({
-                    'zona': z, 'subzona': sz, 'tecnico': t,
-                    'pendientes': info['total'],
-                    'detalle_estados': breakdown,
-                    'finalizadas': tech_finalized.get(t, 0) if t != "SIN_ASIGNAR" else 0,
-                    'carga_total': tech_total.get(t, 0) if t != "SIN_ASIGNAR" else info['total'],
-                })
+        for t in sorted(tech_subzone_map.keys()):
+            sz_map = tech_subzone_map[t]
+            total_pending = sum(sum(v for v in sts.values()) for sts in sz_map.values())
+            # Armar texto por subzona: "SubzonaX: Estado1(n), Estado2(n)"
+            subzona_lines = []
+            for sz in sorted(sz_map.keys()):
+                sts = sz_map[sz]
+                estados_str = "  /  ".join(f"{k}({v})" for k, v in sts.items())
+                subzona_lines.append(f"{sz}: {estados_str}")
+            subzone_summaries.append({
+                'zona': z,
+                'tecnico': t,
+                'subzonas_detalle': "\n".join(subzona_lines),
+                'num_subzonas': len(sz_map),
+                'pendientes': total_pending,
+                'finalizadas': tech_finalized.get(t, 0) if t != "SIN_ASIGNAR" else 0,
+                'carga_total': tech_total.get(t, 0) if t != "SIN_ASIGNAR" else total_pending,
+            })
 
         # ===========================================
         # PASO 5: NIVELACION INTELIGENTE (Mejorada v6)
@@ -758,28 +775,40 @@ def generate_suggestions(input_file, forced_hour=None):
                         )
                         if not can_handle: continue
                         
-                        # --- VALIDACIÓN NUEVA: Capacidad en Origen para Inter-Zona ---
+                        # --- VALIDACIÓN INTER-ZONA ESTRICTA ---
                         is_it_interzone = tech_main_zone.get(r) != z
                         if is_it_interzone:
-                            # 1. Solo un movimiento inter-zona por técnico
+                            # 1. Solo un movimiento inter-zona por técnico donante
                             if donor in techs_moved_from_zone: continue
-                            # 2. La zona origen debe tener otros técnicos para soporte
+                            # 2. La zona origen debe tener al menos otro técnico activo
                             if not has_zone_capacity(z): continue
-                            
-                            # 3. RESTRICCIÓN AM (Nuevo v7): Evitar movimientos inter-zona en la mañana
-                            # a menos que el desbalance sea muy crítico.
-                            if current_hour < 12.0:
-                                # Estimar promedios de ambas zonas
-                                target_zone = tech_main_zone.get(r)
-                                target_techs = [t for t, mz in tech_main_zone.items() if mz == target_zone]
-                                source_techs = [t for t, mz in tech_main_zone.items() if mz == z]
-                                
-                                target_avg = sum(tech_pending.get(t, 0) for t in target_techs) / len(target_techs) if target_techs else 0
-                                source_avg = sum(tech_pending.get(t, 0) for t in source_techs) / len(source_techs) if source_techs else 0
 
-                                # Solo si la zona destino está más cargada (>0.2 de diferencia en promedio)
-                                if (target_avg - source_avg) < 0.2:
-                                    continue # No mover en AM si no hay un desnivel claro
+                            # 3. Validar que la zona destino tiene sobrecarga REAL
+                            r_zone = tech_main_zone.get(r, "")
+                            dst_techs = [t2 for t2, mz in tech_main_zone.items() if mz == r_zone]
+                            src_techs = [t2 for t2, mz in tech_main_zone.items() if mz == z]
+
+                            dst_avg = (sum(tech_pending.get(t2, 0) for t2 in dst_techs) / len(dst_techs)
+                                      if dst_techs else 0)
+                            src_avg = (sum(tech_pending.get(t2, 0) for t2 in src_techs) / len(src_techs)
+                                      if src_techs else 0)
+
+                            # La zona destino debe estar genuinamente cargada
+                            if dst_avg < (MAX_IDEAL_LOAD - 1):
+                                continue  # No mover si destino no está saturado
+
+                            # La diferencia de promedio debe ser significativa (≥ 1.5 órdenes)
+                            if (dst_avg - src_avg) < 1.5:
+                                continue  # No mover si no hay un desnivel real
+
+                            # 4. La zona origen puede prescindir (algún técnico libre)
+                            src_has_spare = any(
+                                tech_pending.get(t2, 0) < MAX_IDEAL_LOAD
+                                for t2 in src_techs
+                                if t2 not in techs_moved_from_zone and t2 != donor
+                            )
+                            if not src_has_spare:
+                                continue  # No mover si la zona origen queda desprotegida
 
                         # SCORING
                         score = tech_total.get(r, 0) * 500
@@ -852,27 +881,28 @@ def generate_suggestions(input_file, forced_hour=None):
             final_pends = [tech_pending.get(t, 0) for t in active_techs_in_zone]
             current_zone_summary['desbalance_final'] = max(final_pends) - min(final_pends)
             
-            # --- APOYO PROACTIVO (Nuevo v7) ---
-            # Si todos en esta zona tienen carga óptima, ofrecer apoyo a la zona vecina más cargada
-            if all(tech_pending.get(t, 0) <= 3 for t in active_techs_in_zone) and active_techs_in_zone:
+            # --- APOYO PROACTIVO ---
+            # Requiere: zona vecina genuinamente saturada (avg >= MAX_IDEAL_LOAD)
+            # y el técnico donante no ha sido movido aún.
+            local_avg = sum(tech_pending.get(t, 0) for t in active_techs_in_zone) / len(active_techs_in_zone)
+            if local_avg <= (MAX_IDEAL_LOAD - 2) and active_techs_in_zone:
                 neighbors = ZONE_ADJACENCY.get(z.upper(), [])
                 saturada = None
                 max_load = -1
                 for n_zone in neighbors:
-                    # Estimar carga de la zona vecina
                     other_techs = [t for t, mz in tech_main_zone.items() if mz.upper() == n_zone]
                     if not other_techs: continue
                     other_avg = sum(tech_pending.get(t, 0) for t in other_techs) / len(other_techs)
-                    if other_avg > 4 and other_avg > max_load:
+                    # Zona vecina debe estar significativamente sobrecargada (>= MAX_IDEAL_LOAD)
+                    if other_avg >= MAX_IDEAL_LOAD and (other_avg - local_avg) >= 2.0 and other_avg > max_load:
                         max_load = other_avg
                         saturada = n_zone
-                
+
                 if saturada:
-                    # Mover al técnico con menos carga proactivamente
-                    pro_donor = min(active_techs_in_zone, key=lambda t: tech_pending.get(t, 0))
-                    if pro_donor not in techs_moved_from_zone:
-                        # Buscamos una orden unassigned en la zona saturada o simplemente avisamos
-                        # Para este script, buscaremos una orden 'SIN_ASIGNAR' en la zona destino
+                    # Candidatos que no han sido movidos
+                    candidates = [t for t in active_techs_in_zone if t not in techs_moved_from_zone]
+                    if candidates:
+                        pro_donor = min(candidates, key=lambda t: tech_pending.get(t, 0))
                         target_orders = [d for d in tech_movable.get("SIN_ASIGNAR", []) if d['zona'].upper() == saturada]
                         if target_orders:
                             order = target_orders[0]
@@ -885,16 +915,18 @@ def generate_suggestions(input_file, forced_hour=None):
                                 suggestions.append({
                                     'zona': f"{saturada} (APOYO PROACTIVO)",
                                     'subzona': order['subzona'],
-                                    'origen': pro_donor, 'destino': "SIN_ASIGNAR (Destino)", # En el destino se le asignará
+                                    'origen': pro_donor, 'destino': "SIN_ASIGNAR (Destino)",
                                     'order_id': order['order_id'], 'franja': order['franja'],
                                     'address': order.get('address', ''), 'distancia_estimada': f"{dist_km:.2f} km",
                                     'alerta': "Apoyo Proactivo",
                                     'pendientes_origen': tech_pending.get(pro_donor, 0),
-                                    'pendientes_destino': 99, # Representa alta carga
-                                    'justificacion': f"Zona {z} en carga optima. Apoyo a {saturada} por saturacion."
+                                    'pendientes_destino': round(max_load, 1),
+                                    'justificacion': (
+                                        f"Zona {z} en carga optima (avg {local_avg:.1f}). "
+                                        f"Apoyo a {saturada} por saturacion (avg {max_load:.1f})."
+                                    )
                                 })
                                 techs_moved_from_zone.add(pro_donor)
-                                # Actualizamos localmente para no repetir
                                 tech_pending[pro_donor] += 1
                                 tech_total[pro_donor] += 1
                                 tech_movable.get("SIN_ASIGNAR", []).remove(order)
@@ -902,10 +934,72 @@ def generate_suggestions(input_file, forced_hour=None):
             current_zone_summary['desbalance_final'] = 0
 
     # ===========================================
-    # PASO 6: INTERCAMBIOS (SWAPS) GLOBALES Y ADYACENTES
+    # PASO 6: INTERCAMBIOS Y REASIGNACIONES POR PROXIMIDAD
     # ===========================================
-    # Se realiza al final para optimizar rutas cruzadas entre zonas vecinas
     all_techs_global = sorted([t for t in tech_total.keys() if t != "SIN_ASIGNAR"])
+
+    # -------------------------------------------------------------------
+    # 6A: REASIGNACIÓN POR PROXIMIDAD (intra-zona)
+    # Mejora productividad: si un técnico está significativamente más cerca
+    # de una orden programada de otro técnico de la misma zona, se sugiere
+    # la reasignación para reducir tiempos de desplazamiento.
+    # -------------------------------------------------------------------
+    PROXIMITY_GAIN_MIN_KM = 1.5  # Ganancia mínima de km para sugerir reasignación
+
+    for t1 in all_techs_global:
+        if not tech_movable.get(t1): continue
+        for t2 in all_techs_global:
+            if t2 <= t1: continue
+            if not tech_movable.get(t2): continue
+            # Solo misma zona
+            if tech_main_zone.get(t1) != tech_main_zone.get(t2): continue
+            # Carga similar (diferencia <= 1) para no desbalancear
+            if abs(tech_pending.get(t1, 0) - tech_pending.get(t2, 0)) > 1: continue
+
+            c1 = get_centroid(tech_locations.get(t1, [(0, 0)]))
+            c2 = get_centroid(tech_locations.get(t2, [(0, 0)]))
+
+            # Revisar si alguna orden de t1 está más cerca de t2
+            for o1 in list(tech_movable[t1]):
+                if o1['lat'] == 0: continue
+                d_o1_t1 = haversine(o1['lat'], o1['lon'], c1[0], c1[1])
+                d_o1_t2 = haversine(o1['lat'], o1['lon'], c2[0], c2[1])
+                gain = d_o1_t1 - d_o1_t2  # positivo = t2 está más cerca
+                if gain >= PROXIMITY_GAIN_MIN_KM:
+                    can_handle, _ = can_tech_handle_franja(
+                        tech_franja_counts.get(t2, {}),
+                        tech_all_orders.get(t2, []),
+                        o1['franja'], current_hour
+                    )
+                    if not can_handle: continue
+                    suggestions.append({
+                        'zona': tech_main_zone.get(t1, ''),
+                        'subzona': o1['subzona'],
+                        'origen': t1,
+                        'destino': t2,
+                        'order_id': o1['order_id'],
+                        'franja': o1['franja'],
+                        'address': o1.get('address', ''),
+                        'distancia_estimada': f"{d_o1_t2:.2f} km (antes {d_o1_t1:.2f} km)",
+                        'alerta': 'REASIGNACION PROXIMITY',
+                        'pendientes_origen': tech_pending.get(t1, 0),
+                        'pendientes_destino': tech_pending.get(t2, 0),
+                        'justificacion': (
+                            f"{t2} esta {gain:.1f} km mas cerca de la orden {o1['order_id']}. "
+                            f"Reasignar reduce desplazamiento sin afectar carga."
+                        )
+                    })
+                    # Actualizar contadores internos
+                    tech_movable[t1].remove(o1)
+                    tech_pending[t1] = max(0, tech_pending.get(t1, 0) - 1)
+                    tech_pending[t2] = tech_pending.get(t2, 0) + 1
+                    if t2 not in tech_franja_counts: tech_franja_counts[t2] = {}
+                    tech_franja_counts[t2][o1['franja']] = tech_franja_counts[t2].get(o1['franja'], 0) + 1
+                    break  # Una reasignación por par de técnicos
+
+    # -------------------------------------------------------------------
+    # 6B: INTERCAMBIOS (SWAPS) globales y adyacentes
+    # -------------------------------------------------------------------
     
     for t1 in all_techs_global:
         if not tech_movable.get(t1): continue
@@ -952,17 +1046,30 @@ def generate_suggestions(input_file, forced_hour=None):
                             subzone_bonus = 1.0 # Equivalente a ahorrar 1km extra
 
                     if (total_saved + subzone_bonus) > threshold:
+                        # Armar texto claro para copiar/pegar
+                        addr_o1 = o1.get('address') or o1['subzona']
+                        addr_o2 = o2.get('address') or o2['subzona']
+                        swap_detail = (
+                            f"{t2} recibe: {o1['order_id']} | {addr_o1} ({o1['franja']})\n"
+                            f"{t1} recibe: {o2['order_id']} | {addr_o2} ({o2['franja']})"
+                        )
                         suggestions.append({
                             'zona': z1 if is_same_zone else f"{z1} <-> {z2}",
                             'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
-                            'origen': f"INTERCAMBIO: {t1} y {t2}",
-                            'destino': "Intercambio de Ordenes",
-                            'order_id': f"{o1['order_id']} <-> {o2['order_id']}",
+                            'origen': f"INTERCAMBIO: {t1}  /  {t2}",
+                            'destino': "Ver Justificacion",
+                            'order_id': f"{t1}: {o1['order_id']}   |   {t2}: {o2['order_id']}",
                             'franja': o1['franja'],
-                            'address': f"Swap para ahorrar {total_saved:.1f} km" + (" (Mejor Subzona)" if subzone_bonus > 0 else ""),
-                            'distancia_estimada': "Optimo", 'alerta': "INTERCAMBIO",
+                            'address': swap_detail,
+                            'distancia_estimada': f"Ahorro {total_saved:.1f} km" + (" + Subzona" if subzone_bonus > 0 else ""),
+                            'alerta': "INTERCAMBIO",
                             'pendientes_origen': tech_pending.get(t1, 0),
-                            'pendientes_destino': tech_pending.get(t2, 0)
+                            'pendientes_destino': tech_pending.get(t2, 0),
+                            'justificacion': (
+                                f"{t2} queda mas cerca de {addr_o1} ({o1['subzona']}); "
+                                f"{t1} queda mas cerca de {addr_o2} ({o2['subzona']}). "
+                                f"Ahorro total: {total_saved:.1f} km."
+                            )
                         })
                         # Actualizar movibles para no volver a procesarlas
                         tech_movable[t1].remove(o1)
@@ -1000,20 +1107,35 @@ def generate_suggestions(input_file, forced_hour=None):
 
     auto_fit_columns(ws_zona)
 
-    # --- HOJA 2: Resumen por Subzona ---
-    ws_sub = wb_out.create_sheet("Resumen por Subzona")
-    sh = ['Zona', 'Subzona', 'Tecnico', 'Pendientes', 'Finalizadas',
-          'Carga Total', 'Detalle Estados']
+    # --- HOJA 2: Distribución por Técnico (vista consolidada) ---
+    ws_sub = wb_out.create_sheet("Distribucion por Tecnico")
+    sh = [
+        'Zona', 'Tecnico', 'Subzonas y Estados',
+        'Pend. Totales', 'Finalizadas', 'Carga Total', '# Subzonas'
+    ]
     ws_sub.append(sh)
     style_header_row(ws_sub, len(sh))
+    ws_sub.row_dimensions[1].height = 18
 
-    subzone_summaries.sort(key=lambda x: (x['zona'], x['subzona'], x['tecnico']))
+    subzone_summaries.sort(key=lambda x: (x['zona'], x['tecnico']))
     for s in subzone_summaries:
         row_num = ws_sub.max_row + 1
         ws_sub.append([
-            s['zona'], s['subzona'], s['tecnico'], s['pendientes'],
-            s['finalizadas'], s['carga_total'], s['detalle_estados']
+            s['zona'],
+            s['tecnico'],
+            s['subzonas_detalle'],   # una línea por subzona
+            s['pendientes'],
+            s['finalizadas'],
+            s['carga_total'],
+            s['num_subzonas'],
         ])
+        # Activar wrap_text en la celda de detalle
+        ws_sub.cell(row=row_num, column=3).alignment = Alignment(wrap_text=True, vertical='top')
+        ws_sub.cell(row=row_num, column=1).alignment = Alignment(vertical='top')
+        ws_sub.cell(row=row_num, column=2).alignment = Alignment(vertical='top')
+        # Altura de fila proporcional al número de subzonas
+        ws_sub.row_dimensions[row_num].height = max(18, s['num_subzonas'] * 16)
+        # Color por carga
         if s['carga_total'] > MAX_ABSOLUTE_LOAD:
             ws_sub.cell(row=row_num, column=6).fill = ALERT_FILL
         elif s['carga_total'] >= MAX_IDEAL_LOAD:
@@ -1021,7 +1143,12 @@ def generate_suggestions(input_file, forced_hour=None):
         elif s['pendientes'] <= 2:
             ws_sub.cell(row=row_num, column=4).fill = SUCCESS_FILL
 
-    auto_fit_columns(ws_sub)
+    # Ancho fijo para la columna de detalle (más amplia)
+    ws_sub.column_dimensions['C'].width = 60
+    ws_sub.column_dimensions['A'].width = 16
+    ws_sub.column_dimensions['B'].width = 28
+    for col_letter in ['D', 'E', 'F', 'G']:
+        ws_sub.column_dimensions[col_letter].width = 14
 
     # --- HO_A 3: Sugerencias ---
     ws_sug = wb_out.create_sheet("Sugerencias de Movimientos")
@@ -1075,7 +1202,7 @@ def generate_suggestions(input_file, forced_hour=None):
 
     # --- Guardar ---
     try:
-        date_tag = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        date_tag = now_bogota().strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"sugerencias_nivelacion_{date_tag}.xlsx"
         output_path = os.path.join(os.getcwd(), filename)
         wb_out.save(output_path)

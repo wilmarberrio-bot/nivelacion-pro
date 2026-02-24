@@ -1046,30 +1046,19 @@ def generate_suggestions(input_file, forced_hour=None):
                             subzone_bonus = 1.0 # Equivalente a ahorrar 1km extra
 
                     if (total_saved + subzone_bonus) > threshold:
-                        # Armar texto claro para copiar/pegar
-                        addr_o1 = o1.get('address') or o1['subzona']
-                        addr_o2 = o2.get('address') or o2['subzona']
-                        swap_detail = (
-                            f"{t2} recibe: {o1['order_id']} | {addr_o1} ({o1['franja']})\n"
-                            f"{t1} recibe: {o2['order_id']} | {addr_o2} ({o2['franja']})"
-                        )
                         suggestions.append({
                             'zona': z1 if is_same_zone else f"{z1} <-> {z2}",
                             'subzona': f"{o1['subzona']} <-> {o2['subzona']}",
-                            'origen': f"INTERCAMBIO: {t1}  /  {t2}",
-                            'destino': "Ver Justificacion",
-                            'order_id': f"{t1}: {o1['order_id']}   |   {t2}: {o2['order_id']}",
+                            'origen': t1,
+                            'destino': t2,
+                            'order_id': f"{o1['order_id']} -> {t2}  /  {o2['order_id']} -> {t1}",
                             'franja': o1['franja'],
-                            'address': swap_detail,
+                            'address': f"{o1['order_id']} ({o1['franja']})  <->  {o2['order_id']} ({o2['franja']})",
                             'distancia_estimada': f"Ahorro {total_saved:.1f} km" + (" + Subzona" if subzone_bonus > 0 else ""),
                             'alerta': "INTERCAMBIO",
                             'pendientes_origen': tech_pending.get(t1, 0),
                             'pendientes_destino': tech_pending.get(t2, 0),
-                            'justificacion': (
-                                f"{t2} queda mas cerca de {addr_o1} ({o1['subzona']}); "
-                                f"{t1} queda mas cerca de {addr_o2} ({o2['subzona']}). "
-                                f"Ahorro total: {total_saved:.1f} km."
-                            )
+                            'justificacion': f"Ahorro {total_saved:.1f} km en desplazamiento."
                         })
                         # Actualizar movibles para no volver a procesarlas
                         tech_movable[t1].remove(o1)

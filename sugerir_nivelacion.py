@@ -919,6 +919,124 @@ def generate_suggestions(input_file, forced_hour=None):
         else:
             current_zone_summary['desbalance_final'] = 0
 
+    # ==========================================================
+    # PASO 5.6: ASIGNAR "POR PROGRAMAR" (SIN_ASIGNAR) dentro de la misma zona
+    # Objetivo: garantizar que TODA orden sin técnico (ej. status "Por programar")
+    # quede sugerida a un técnico de la zona/subzona, si existe capacidad.
+    # - Prioriza misma subzona / misma unidad (addr_key)
+    # - Respeta franja: 2 por franja y 1 franja duplicada (con excepción condicional por misma unidad)
+    # ==========================================================
+    remaining_unassigned = list(tech_movable.get("SIN_ASIGNAR", []))
+    if remaining_unassigned:
+        # construir mapa técnicos por zona desde tech_main_zone (más confiable que zone loop anterior)
+        zone_techs_all = {}
+        for t, mz in tech_main_zone.items():
+            if t == "SIN_ASIGNAR" or not mz:
+                continue
+            zone_techs_all.setdefault(mz, []).append(t)
+
+        def receiver_score(order, receiver):
+            # Score: menor carga + subzona + distancia + unidad
+            score = tech_pending.get(receiver, 0) * 900 + tech_total.get(receiver, 0) * 400
+
+            # Bonus subzona
+            if order.get('subzona') and order['subzona'] in tech_subzones.get(receiver, set()):
+                score -= 1800
+
+            # Bonus misma unidad
+            if order.get('addr_key') and order['addr_key'] in set(o.get('addr_key') for o in tech_all_orders.get(receiver, [])):
+                score -= 2200
+
+            # Distancia si hay coords + ubicaciones del técnico
+            if order.get('lat', 0) and order.get('lon', 0) and receiver in tech_locations:
+                c = get_centroid(tech_locations[receiver])
+                dist = haversine(order['lat'], order['lon'], c[0], c[1])
+                score += dist * 250
+            return score
+
+        for order in list(remaining_unassigned):
+            z = order.get('zona')
+            if not z or z == "SIN_ZONA":
+                continue
+
+            # receptores dentro de la misma zona
+            recipients = zone_techs_all.get(z, [])
+            if not recipients:
+                continue
+
+            best_r = None
+            best_s = float('inf')
+            best_reason = ""
+
+            for r in recipients:
+                if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD:
+                    continue
+
+                same_unit_flag = False
+                # misma unidad por addr_key (si hay)
+                if order.get('addr_key'):
+                    same_unit_flag = order['addr_key'] in set(o.get('addr_key') for o in tech_all_orders.get(r, []) if o.get('addr_key'))
+
+                can_ok, reason = can_tech_handle_franja(
+                    tech_franja_counts.get(r, {}),
+                    tech_all_orders.get(r, []),
+                    order.get('franja', ''),
+                    current_hour,
+                    allow_same_unit_override=True,
+                    same_unit=same_unit_flag
+                )
+                if not can_ok:
+                    continue
+
+                s = receiver_score(order, r)
+                if s < best_s:
+                    best_s = s
+                    best_r = r
+                    best_reason = reason
+
+            if not best_r:
+                continue
+
+            # Registrar sugerencia
+            dist_msg = "N/A"
+            if order.get('lat', 0) and order.get('lon', 0) and best_r in tech_locations:
+                c = get_centroid(tech_locations[best_r])
+                dist_msg = f"{haversine(order['lat'], order['lon'], c[0], c[1]):.2f} km"
+
+            alert = "ASIGNAR POR PROGRAMAR"
+            if "EXCEPCION" in best_reason:
+                alert = "ASIGNAR POR PROGRAMAR (CONDICIONAL: MISMA UNIDAD)"
+
+            suggestions.append({
+                'zona': z,
+                'subzona': order.get('subzona', ''),
+                'origen': "SIN_ASIGNAR",
+                'destino': best_r,
+                'order_id': order.get('order_id', ''),
+                'franja': order.get('franja', ''),
+                'address': order.get('address', ''),
+                'distancia_estimada': dist_msg if dist_msg else "N/A",
+                'alerta': alert,
+                'pendientes_origen': 0,
+                'pendientes_destino': tech_pending.get(best_r, 0),
+                'justificacion': f"Orden sin técnico (Por programar). Asignación sugerida en zona {z}. {best_reason}."
+            })
+
+            # Actualizar contadores internos (simulación)
+            tech_total[best_r] = tech_total.get(best_r, 0) + 1
+            tech_pending[best_r] = tech_pending.get(best_r, 0) + 1
+            tech_franja_counts.setdefault(best_r, {})
+            fr = order.get('franja', '')
+            tech_franja_counts[best_r][fr] = tech_franja_counts[best_r].get(fr, 0) + 1
+            tech_all_orders.setdefault(best_r, []).append(order)
+
+            # remover del pool SIN_ASIGNAR para evitar duplicados
+            try:
+                tech_movable.get("SIN_ASIGNAR", []).remove(order)
+            except:
+                pass
+
+
 
     # ==========================================================
     # PASO 5.9: APOYO PROACTIVO INTER-ZONA (post 1ra franja)
@@ -1515,4 +1633,3 @@ if __name__ == "__main__":
             print(f"Archivo guardado en: {path}")
     else:
         print("No se encontro archivo Excel valido.")
-

@@ -2,16 +2,10 @@ from flask import Flask, render_template, jsonify, send_file, request
 import os
 import sys
 import uuid
+import importlib
 
-# Import core logic
-print("Iniciando importacion de sugerir_nivelacion...")
+# (Opcional) asegurar path del proyecto
 sys.path.append(os.getcwd())
-try:
-    import sugerir_nivelacion
-    print("Importacion completada exitosamente.")
-except Exception as e:
-    print(f"ERROR CRITICO al importar sugerir_nivelacion: {str(e)}")
-    raise
 
 app = Flask(__name__)
 print(f"Aplicacion Flask instanciada. PORT: {os.environ.get('PORT', '5000 (default)')}")
@@ -33,6 +27,11 @@ def index():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
+        # ✅ Lazy import: solo carga el motor cuando se usa /analyze
+        print("Cargando modulo sugerir_nivelacion bajo demanda...")
+        sugerir_nivelacion = importlib.import_module("sugerir_nivelacion")
+        print("Modulo sugerir_nivelacion cargado OK.")
+
         input_file = None
 
         # Procesar archivo subido (Cloud Mode)

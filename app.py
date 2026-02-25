@@ -87,3 +87,6 @@ def download(filename):
 if __name__ == '__main__':
     # Para pruebas locales
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+@app.get("/health")
+def health():
+    return "ok", 200

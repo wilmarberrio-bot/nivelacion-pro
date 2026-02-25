@@ -1,4 +1,4 @@
-mport math
+import math
 import re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1515,3 +1515,4 @@ if __name__ == "__main__":
             print(f"Archivo guardado en: {path}")
     else:
         print("No se encontro archivo Excel valido.")
+

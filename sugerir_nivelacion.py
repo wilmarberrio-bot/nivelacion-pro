@@ -1405,6 +1405,9 @@ def generate_suggestions(input_file, forced_hour=None):
 
             for o1 in orders_t1:
                 for o2 in orders_t2:
+                    # ✅ Regla: INTERCAMBIOS solo en la MISMA franja
+                    if o1.get('franja') != o2.get('franja'):
+                        continue
                     # Sin coords y no misma unidad => no podemos justificar distancias
                     same_unit_flag = is_same_unit(o1, o2)
                     if (o1.get('lat', 0) == 0 or o2.get('lat', 0) == 0 or o1.get('lon', 0) == 0 or o2.get('lon', 0) == 0) and not same_unit_flag:
@@ -1475,7 +1478,7 @@ def generate_suggestions(input_file, forced_hour=None):
                             'origen': t1,
                             'destino': t2,
                             'order_id': f"{o1['order_id']} -> {t2}  /  {o2['order_id']} -> {t1}",
-                            'franja': f"{o1['franja']} / {o2['franja']}",
+                            'franja': o1.get('franja',''),
                             'address': f"{o1['order_id']} ({o1['franja']})  <->  {o2['order_id']} ({o2['franja']})",
                             'distancia_estimada': dist_msg,
                             'alerta': alert,

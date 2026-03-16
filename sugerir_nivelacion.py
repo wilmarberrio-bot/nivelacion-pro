@@ -124,20 +124,37 @@ def extract_coords_from_text(text):
     Extrae lat/lon de:
       - google maps: .../@lat,lon,17z
       - query: ...?q=lat,lon
+      - query: ...?ll=lat,lon
+      - google maps data: ...!3dLAT!4dLON
       - texto: "lat, lon"
+    Nota: si el link está acortado (bit.ly / goo.gl) o no contiene coords,
+    no es posible extraer sin resolver redirecciones.
     """
     if not text:
         return None, None
     t = str(text)
 
+    # patrón @lat,lon
     m = re.search(r'@(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)', t)
     if m:
         return float(m.group(1)), float(m.group(2))
 
+    # patrón q=lat,lon
     m = re.search(r'[?&]q=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)', t)
     if m:
         return float(m.group(1)), float(m.group(2))
 
+    # patrón ll=lat,lon
+    m = re.search(r'[?&]ll=(-?\d{1,3}\.\d+),\s*(-?\d{1,3}\.\d+)', t)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    # patrón !3dLAT!4dLON (típico en /data=... de Google Maps)
+    m = re.search(r'!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)', t)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+
+    # patrón "lat, lon"
     m = re.search(r'(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)', t)
     if m:
         return float(m.group(1)), float(m.group(2))
@@ -161,6 +178,39 @@ def is_same_unit(o1: dict, o2: dict) -> bool:
         except Exception:
             return False
     return False
+
+
+
+
+def order_has_coords(order: dict) -> bool:
+    return bool(order.get('coords_ok')) or bool(order.get('lat', 0) and order.get('lon', 0))
+
+def allow_subzone_move_when_no_coords(order: dict, receiver: str, tech_subzones: dict, tech_all_orders: dict) -> bool:
+    """Regla dura solicitada:
+    - Si una orden NO tiene coords (ni lat/lon ni pudo extraerse del Google Maps Link),
+      NO permitir movimientos entre subzonas por distancia.
+    - Solo permitir reasignación si:
+        a) MISMA UNIDAD (addr_key match) con el receptor, o
+        b) El receptor YA trabaja esa subzona (conocimiento local).
+    """
+    if order_has_coords(order):
+        return True
+    # sin coords: solo misma unidad o misma subzona
+    ak = order.get('addr_key', '')
+    if ak:
+        for o in tech_all_orders.get(receiver, []):
+            if o.get('addr_key') == ak:
+                return True
+    sz = order.get('subzona')
+    if sz and (sz in tech_subzones.get(receiver, set())):
+        return True
+    return False
+
+def allow_zone_only_assignment_when_no_coords(order: dict) -> bool:
+    """Si no hay coords, permitimos sugerir SOLO por zona (sin prometer subzona)."""
+    return not order_has_coords(order)
+
+
 
 def get_latest_preruta_file():
     files = glob.glob("*.xlsx")
@@ -471,6 +521,8 @@ def generate_suggestions(input_file, forced_hour=None):
             'tech': tech, 'zona': zona, 'subzona': subzona,
             'order_id': order_id, 'status': status, 'franja': franja,
             'lat': lat, 'lon': lon, 'address': address, 'maps_link': maps_link, 'addr_key': addr_key,
+            'maps_present': bool(maps_link),
+            'coords_ok': (lat != 0.0 and lon != 0.0),
             'sector': coords_to_sector(lat, lon, subzona),
             'onsite_hour': onsite_hour
         })
@@ -824,6 +876,9 @@ def generate_suggestions(input_file, forced_hour=None):
                         )
                         if not can_handle:
                             continue
+                        # ✅ Regla dura sin coords: solo misma unidad o técnico ya en subzona
+                        if not allow_subzone_move_when_no_coords(order, r, tech_subzones, tech_all_orders):
+                            continue
 
                         is_it_interzone = (tech_main_zone.get(r) != z)
                         if is_it_interzone:
@@ -989,6 +1044,15 @@ def generate_suggestions(input_file, forced_hour=None):
                     continue
 
                 s = receiver_score(order, r)
+                zone_only_no_coords = False
+                if allow_zone_only_assignment_when_no_coords(order):
+                    # si no cumple misma unidad/subzona, lo dejamos como candidato pero penalizado y marcado
+                    if not allow_subzone_move_when_no_coords(order, r, tech_subzones, tech_all_orders):
+                        zone_only_no_coords = True
+                s = receiver_score(order, r)
+                if zone_only_no_coords:
+                    s += 50000  # penalización fuerte: solo se elige si no hay mejores
+                    reason = (reason + ' | SIN COORDS: sugerencia por zona (no por subzona)')
                 if s < best_s:
                     best_s = s
                     best_r = r
@@ -1004,6 +1068,8 @@ def generate_suggestions(input_file, forced_hour=None):
                 dist_msg = f"{haversine(order['lat'], order['lon'], c[0], c[1]):.2f} km"
 
             alert = "ASIGNAR POR PROGRAMAR"
+            if allow_zone_only_assignment_when_no_coords(order) and ("SIN COORDS" in best_reason):
+                alert = "ASIGNAR POR ZONA (SIN COORDS)"
             if "EXCEPCION" in best_reason:
                 alert = "ASIGNAR POR PROGRAMAR (CONDICIONAL: MISMA UNIDAD)"
 

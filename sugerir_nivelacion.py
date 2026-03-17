@@ -27,7 +27,10 @@ MAX_DUPLICATED_SLOTS = 1   # Permitir maximo 1 franja duplicada (hard)
 MIN_IMBALANCE_TO_MOVE = 1
 ORDER_DURATION_HOURS = 1.0
 MAX_ORDER_DURATION_HOURS = 1.5
-MAX_ALLOWED_DISTANCE_KM = 8.0
+MAX_ALLOWED_DISTANCE_KM = 5.0
+MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
+ZONE_ONLY_NO_COORDS_PENALTY = 50000
+INTERZONE_DISTANCE_PENALTY = 1500
 
 # Optimización por edificio / swaps
 NEARBY_BUILDING_RADIUS_KM = 0.25            # 250m cuenta como misma unidad si hay coords
@@ -249,6 +252,99 @@ def get_centroid(locations):
     avg_lat = sum(loc[0] for loc in locations) / len(locations)
     avg_lon = sum(loc[1] for loc in locations) / len(locations)
     return (avg_lat, avg_lon)
+
+
+def status_effective_weight(status):
+    sl = str(status).lower()
+    if 'cancelado' in sl or 'cancelada' in sl:
+        return 0.70
+    if any(k in sl for k in ['finalizado', 'finalizada', 'por auditar', 'cerrado', 'cerrada', 'completado', 'completada']):
+        return 0.20
+    if any(k in sl for k in NEAR_FINISH_STATUSES):
+        return 0.45
+    if get_status_progress(sl) >= 1:
+        return 1.15
+    if is_status(sl, MOVABLE_STATUSES):
+        return 1.00
+    return 0.90
+
+def status_completion_credit(status):
+    sl = str(status).lower()
+    if any(k in sl for k in ['finalizado', 'finalizada', 'por auditar', 'cerrado', 'cerrada', 'completado', 'completada']):
+        return 1.0
+    if 'cancelado' in sl or 'cancelada' in sl:
+        return 0.25
+    return 0.0
+
+
+def is_completed_or_auditable(status):
+    sl = str(status).lower()
+    return any(k in sl for k in ['finalizado', 'finalizada', 'por auditar', 'cerrado', 'cerrada', 'completado', 'completada'])
+
+def should_alert_low_progress(tech_name, completed_count, peer_counts):
+    if tech_name == "SIN_ASIGNAR":
+        return False
+    if completed_count > 1:
+        return False
+    valid_peers = [c for c in peer_counts if c is not None]
+    if len(valid_peers) < 2:
+        return False
+    peers_with_2_or_more = sum(1 for c in valid_peers if c >= 2)
+    peers_with_3_or_more = sum(1 for c in valid_peers if c >= 3)
+    peer_avg = sum(valid_peers) / len(valid_peers) if valid_peers else 0
+    # Dispara cuando el técnico solo lleva 0-1 cerradas/auditables y el resto del grupo ya va claramente más adelante.
+    return peers_with_2_or_more >= 2 and (peers_with_3_or_more >= 1 or peer_avg >= 2.0)
+
+def get_tech_reference_point(tech_name, tech_all_orders, tech_locations):
+    for o in tech_all_orders.get(tech_name, []):
+        if 1 <= get_status_progress(o.get('status')) < 6 and o.get('lat', 0) and o.get('lon', 0):
+            return (o['lat'], o['lon'])
+
+    upcoming = []
+    for o in tech_all_orders.get(tech_name, []):
+        if is_status(str(o.get('status', '')).lower(), MOVABLE_STATUSES) and o.get('lat', 0) and o.get('lon', 0):
+            fs, _ = parse_franja_hours(o.get('franja'))
+            upcoming.append((fs if fs is not None else 99, o))
+    if upcoming:
+        upcoming.sort(key=lambda x: x[0])
+        od = upcoming[0][1]
+        return (od['lat'], od['lon'])
+
+    locs = tech_locations.get(tech_name, [])
+    if locs:
+        return get_centroid(locs)
+    return (0, 0)
+
+def estimate_distance_to_receiver(order, receiver, tech_all_orders, tech_locations):
+    if not order.get('lat', 0) or not order.get('lon', 0):
+        return None
+    ref = get_tech_reference_point(receiver, tech_all_orders, tech_locations)
+    if not ref or ref == (0, 0):
+        return None
+    return haversine(order['lat'], order['lon'], ref[0], ref[1])
+
+def zone_rank_from(origin_zone, target_zone):
+    oz = norm_zone(origin_zone)
+    tz = norm_zone(target_zone)
+    if oz == tz:
+        return 0
+    neighbors = ZONE_ADJACENCY.get(oz, [])
+    try:
+        return neighbors.index(tz) + 1
+    except ValueError:
+        return 999
+
+def tech_load_score(tech_name, tech_pending, tech_total, tech_effective_load, tech_completion_credit_map, tech_franja_counts, tech_subzones):
+    duplicated = count_duplicated_slots(tech_franja_counts.get(tech_name, {}))
+    subzone_count = len(tech_subzones.get(tech_name, set()))
+    return (
+        tech_effective_load.get(tech_name, 0.0) * 1200
+        + tech_pending.get(tech_name, 0) * 700
+        + tech_total.get(tech_name, 0) * 180
+        + duplicated * 500
+        + subzone_count * 120
+        - tech_completion_credit_map.get(tech_name, 0.0) * 180
+    )
 
 def parse_franja_hours(franja_str):
     if not franja_str or franja_str == 'Sin Franja':
@@ -577,6 +673,8 @@ def generate_suggestions(input_file, forced_hour=None):
     tech_total = {}
     tech_finalized = {}
     tech_pending = {}
+    tech_effective_load = {}
+    tech_completion_credit_map = {}
     tech_movable = {}
     tech_all_orders = {}
     tech_locations = {}
@@ -604,6 +702,8 @@ def generate_suggestions(input_file, forced_hour=None):
 
         tech_all_orders.setdefault(t, []).append(d)
         tech_total[t] = tech_total.get(t, 0) + 1
+        tech_effective_load[t] = tech_effective_load.get(t, 0.0) + status_effective_weight(d['status'])
+        tech_completion_credit_map[t] = tech_completion_credit_map.get(t, 0.0) + status_completion_credit(d['status'])
 
         if t not in tech_main_zone and d['zona'] != "SIN_ZONA":
             tech_main_zone[t] = d['zona']
@@ -632,6 +732,7 @@ def generate_suggestions(input_file, forced_hour=None):
             active_buildings.setdefault(d['addr_key'], set()).add(t)
 
     donors_interzone_count = {}
+    receivers_interzone_count = {}
     techs_moved_from_zone = set()
 
     # =========================
@@ -723,6 +824,25 @@ def generate_suggestions(input_file, forced_hour=None):
         initial_finalized_total = sum(tech_finalized.get(t, 0) for t in active_techs_in_zone)
         zone_pends = [tech_pending.get(t, 0) for t in active_techs_in_zone]
 
+        # Alerta de bajo avance relativo: técnico con solo 0-1 orden finalizada/por auditar
+        # mientras varios compañeros de la misma zona ya van en 2-3 o más.
+        zone_completed_counts = {t: tech_finalized.get(t, 0) for t in active_techs_in_zone if t != "SIN_ASIGNAR"}
+        for t, completed_count in zone_completed_counts.items():
+            peer_counts = [c for ot, c in zone_completed_counts.items() if ot != t]
+            if should_alert_low_progress(t, completed_count, peer_counts):
+                peer_avg = round(sum(peer_counts) / len(peer_counts), 1) if peer_counts else 0
+                top_peers = sorted(peer_counts, reverse=True)[:3]
+                alerts.append({
+                    'tipo': 'BAJO AVANCE RELATIVO',
+                    'zona': z,
+                    'tecnico': t,
+                    'detalle': (
+                        f"Lleva {completed_count} orden(es) finalizada(s)/por auditar, mientras otros técnicos de la zona ya van en "
+                        f"{', '.join(str(x) for x in top_peers)} (promedio pares: {peer_avg}). "
+                        f"Validar con supervisor posible baja productividad o sobrecarga operativa al equipo."
+                    )
+                })
+
         current_zone_summary = {
             'zona': z,
             'techs': len(active_techs_in_zone),
@@ -774,7 +894,7 @@ def generate_suggestions(input_file, forced_hour=None):
                 'num_subzonas': len(sz_map),
                 'pendientes': total_pending,
                 'finalizadas': tech_finalized.get(t, 0) if t != "SIN_ASIGNAR" else 0,
-                'carga_total': tech_total.get(t, 0) if t != "SIN_ASIGNAR" else total_pending,
+                'carga_total': round(tech_effective_load.get(t, tech_total.get(t, 0) if t != "SIN_ASIGNAR" else total_pending), 2),
             })
 
         # =========================
@@ -786,7 +906,7 @@ def generate_suggestions(input_file, forced_hour=None):
         if unassigned_in_zone:
             donors.append("SIN_ASIGNAR")
 
-        avg_zone_pending = (sum(tech_pending.get(t, 0) for t in active_techs_in_zone) / len(active_techs_in_zone)) if active_techs_in_zone else 0
+        avg_zone_pending = (sum(tech_effective_load.get(t, tech_pending.get(t, 0)) for t in active_techs_in_zone) / len(active_techs_in_zone)) if active_techs_in_zone else 0
 
         for t in sorted(active_techs_in_zone):
             if t == "SIN_ASIGNAR":
@@ -796,7 +916,7 @@ def generate_suggestions(input_file, forced_hour=None):
                 if t not in donors: donors.append(t)
                 continue
 
-            if (tech_pending.get(t, 0) > MAX_IDEAL_LOAD or tech_pending.get(t, 0) > (avg_zone_pending + 1.1)) \
+            if (tech_effective_load.get(t, tech_pending.get(t, 0)) > MAX_IDEAL_LOAD or tech_effective_load.get(t, tech_pending.get(t, 0)) > (avg_zone_pending + 0.8)) \
                and t in tech_movable and tech_movable[t]:
                 if t not in donors: donors.append(t)
                 continue
@@ -841,7 +961,8 @@ def generate_suggestions(input_file, forced_hour=None):
             if donor == "SIN_ASIGNAR":
                 moves_limit = len(donor_orders)
             else:
-                moves_limit = max(1, tech_total.get(donor, 0) - MAX_IDEAL_LOAD)
+                donor_eff = tech_effective_load.get(donor, tech_pending.get(donor, 0))
+                moves_limit = max(1, math.ceil(max(0.0, donor_eff - MAX_IDEAL_LOAD)))
 
             moved_count = 0
             for order in list(donor_orders):
@@ -873,13 +994,12 @@ def generate_suggestions(input_file, forced_hour=None):
                         if tech_total.get(r, 0) >= MAX_ABSOLUTE_LOAD:
                             continue
 
-                        if donor != "SIN_ASIGNAR":
-                            donor_pends = tech_pending.get(donor, 0)
-                            recv_pends = tech_pending.get(r, 0)
-                            if (donor_pends - recv_pends) < 1:
-                                continue
+                        donor_eff = tech_effective_load.get(donor, tech_pending.get(donor, 0)) if donor != "SIN_ASIGNAR" else None
+                        recv_eff = tech_effective_load.get(r, tech_pending.get(r, 0))
+                        if donor != "SIN_ASIGNAR" and (donor_eff - recv_eff) < 0.55:
+                            continue
 
-                        can_handle, _ = can_tech_handle_franja(
+                        can_handle, handle_reason = can_tech_handle_franja(
                             tech_franja_counts.get(r, {}),
                             tech_all_orders.get(r, []),
                             order['franja'],
@@ -887,34 +1007,43 @@ def generate_suggestions(input_file, forced_hour=None):
                         )
                         if not can_handle:
                             continue
-                        # ✅ Regla dura sin coords: solo misma unidad o técnico ya en subzona
-                        if not allow_subzone_move_when_no_coords(order, r, tech_subzones, tech_all_orders):
+
+                        zone_only_no_coords = False
+                        if allow_zone_only_assignment_when_no_coords(order):
+                            if not allow_subzone_move_when_no_coords(order, r, tech_subzones, tech_all_orders):
+                                zone_only_no_coords = True
+                        elif not allow_subzone_move_when_no_coords(order, r, tech_subzones, tech_all_orders):
                             continue
 
                         is_it_interzone = (tech_main_zone.get(r) != z)
+                        zone_rank = zone_rank_from(z, tech_main_zone.get(r)) if is_it_interzone else 0
                         if is_it_interzone:
                             if donor in techs_moved_from_zone:
+                                continue
+                            if receivers_interzone_count.get(r, 0) >= MAX_INTERZONE_ASSIGNMENTS_PER_TECH:
+                                continue
+                            if zone_rank != 1:
                                 continue
                             if not has_zone_capacity(z):
                                 continue
 
-                        # SCORE (carga + distancia + subzona + tardanza)
-                        score = 0
-                        score += tech_pending.get(r, 0) * 800
-                        score += tech_total.get(r, 0) * 400
+                        score = tech_load_score(r, tech_pending, tech_total, tech_effective_load, tech_completion_credit_map, tech_franja_counts, tech_subzones)
 
-                        dist = 0.0
-                        if order['lat'] != 0 and r in tech_locations:
-                            centroid = get_centroid(tech_locations[r])
-                            dist = haversine(order['lat'], order['lon'], centroid[0], centroid[1])
+                        dist = estimate_distance_to_receiver(order, r, tech_all_orders, tech_locations)
+                        if dist is not None:
                             if dist > MAX_ALLOWED_DISTANCE_KM:
                                 continue
-                            score += dist * 250
+                            score += dist * 300
+                        else:
+                            dist = 0.0
 
                         bonus_sub = 0
                         if order['subzona'] in tech_subzones.get(r, set()):
-                            bonus_sub = -2200
+                            bonus_sub = -2400
                             score += bonus_sub
+
+                        if order.get('addr_key') and order['addr_key'] in set(o.get('addr_key') for o in tech_all_orders.get(r, [])):
+                            score -= 2800
 
                         arr_n, arr_m, f_start, f_end = estimate_arrival_for_franja(
                             tech_all_orders.get(r, []), order['franja'], current_hour
@@ -927,20 +1056,26 @@ def generate_suggestions(input_file, forced_hour=None):
                         elif f_start is not None and arr_n is not None and arr_n > f_start:
                             score += (arr_n - f_start) * 1200
 
+                        if zone_only_no_coords:
+                            score += ZONE_ONLY_NO_COORDS_PENALTY
+                        if is_it_interzone:
+                            score += INTERZONE_DISTANCE_PENALTY * zone_rank
+
                         if score < best_score:
                             best_score = score
                             best_receiver = r
-                            best_detail = f"score={score:.0f} | load={tech_pending.get(r,0)} | dist={dist:.2f} | bonus_sub={bonus_sub} | late_pen={late_pen:.0f}"
+                            best_detail = f"score={score:.0f} | eff_load={recv_eff:.2f} | total={tech_total.get(r,0)} | dist={dist:.2f} | bonus_sub={bonus_sub} | late_pen={late_pen:.0f} | {handle_reason}"
 
                     if pass_num == 2 and best_receiver:
                         donors_interzone_count[donor] = donors_interzone_count.get(donor, 0) + 1
+                        receivers_interzone_count[best_receiver] = receivers_interzone_count.get(best_receiver, 0) + 1
                         techs_moved_from_zone.add(donor)
 
                 if best_receiver:
                     dist_km = 0.0
-                    if best_receiver in tech_locations and order['lat'] != 0:
-                        c = get_centroid(tech_locations[best_receiver])
-                        dist_km = haversine(order['lat'], order['lon'], c[0], c[1])
+                    est_dist = estimate_distance_to_receiver(order, best_receiver, tech_all_orders, tech_locations)
+                    if est_dist is not None:
+                        dist_km = est_dist
 
                     is_interzone = tech_main_zone.get(best_receiver) != z
                     suggestions.append({
@@ -961,6 +1096,7 @@ def generate_suggestions(input_file, forced_hour=None):
                     if donor != "SIN_ASIGNAR":
                         tech_total[donor] -= 1
                         tech_pending[donor] = max(0, tech_pending.get(donor, 0) - 1)
+                        tech_effective_load[donor] = max(0.0, tech_effective_load.get(donor, 0.0) - status_effective_weight(order['status']))
                         current_zone_summary['pendientes_final'] -= 1
                     else:
                         current_zone_summary['sin_asignar_final'] -= 1
@@ -968,6 +1104,7 @@ def generate_suggestions(input_file, forced_hour=None):
 
                     tech_total[best_receiver] = tech_total.get(best_receiver, 0) + 1
                     tech_pending[best_receiver] = tech_pending.get(best_receiver, 0) + 1
+                    tech_effective_load[best_receiver] = tech_effective_load.get(best_receiver, 0.0) + status_effective_weight(order['status'])
 
                     tech_franja_counts.setdefault(best_receiver, {})
                     tech_franja_counts[best_receiver][order['franja']] = tech_franja_counts[best_receiver].get(order['franja'], 0) + 1
@@ -1002,22 +1139,19 @@ def generate_suggestions(input_file, forced_hour=None):
             zone_techs_all.setdefault(mz, []).append(t)
 
         def receiver_score(order, receiver):
-            # Score: menor carga + subzona + distancia + unidad
-            score = tech_pending.get(receiver, 0) * 900 + tech_total.get(receiver, 0) * 400
+            score = tech_load_score(receiver, tech_pending, tech_total, tech_effective_load, tech_completion_credit_map, tech_franja_counts, tech_subzones)
 
-            # Bonus subzona
             if order.get('subzona') and order['subzona'] in tech_subzones.get(receiver, set()):
-                score -= 1800
+                score -= 2000
 
-            # Bonus misma unidad
             if order.get('addr_key') and order['addr_key'] in set(o.get('addr_key') for o in tech_all_orders.get(receiver, [])):
-                score -= 2200
+                score -= 2500
 
-            # Distancia si hay coords + ubicaciones del técnico
-            if order.get('lat', 0) and order.get('lon', 0) and receiver in tech_locations:
-                c = get_centroid(tech_locations[receiver])
-                dist = haversine(order['lat'], order['lon'], c[0], c[1])
-                score += dist * 250
+            dist = estimate_distance_to_receiver(order, receiver, tech_all_orders, tech_locations)
+            if dist is not None:
+                if dist > MAX_ALLOWED_DISTANCE_KM:
+                    return float('inf')
+                score += dist * 300
             return score
 
         for order in list(remaining_unassigned):
@@ -1062,7 +1196,7 @@ def generate_suggestions(input_file, forced_hour=None):
                         zone_only_no_coords = True
                 s = receiver_score(order, r)
                 if zone_only_no_coords:
-                    s += 50000  # penalización fuerte: solo se elige si no hay mejores
+                    s += ZONE_ONLY_NO_COORDS_PENALTY  # penalización fuerte: solo se elige si no hay mejores
                     reason = (reason + ' | SIN COORDS: sugerencia por zona (no por subzona)')
                 if s < best_s:
                     best_s = s
@@ -1074,9 +1208,9 @@ def generate_suggestions(input_file, forced_hour=None):
 
             # Registrar sugerencia
             dist_msg = "N/A"
-            if order.get('lat', 0) and order.get('lon', 0) and best_r in tech_locations:
-                c = get_centroid(tech_locations[best_r])
-                dist_msg = f"{haversine(order['lat'], order['lon'], c[0], c[1]):.2f} km"
+            est_dist = estimate_distance_to_receiver(order, best_r, tech_all_orders, tech_locations)
+            if est_dist is not None:
+                dist_msg = f"{est_dist:.2f} km"
 
             alert = "ASIGNAR POR PROGRAMAR"
             if allow_zone_only_assignment_when_no_coords(order) and ("SIN COORDS" in best_reason):
@@ -1102,6 +1236,7 @@ def generate_suggestions(input_file, forced_hour=None):
             # Actualizar contadores internos (simulación)
             tech_total[best_r] = tech_total.get(best_r, 0) + 1
             tech_pending[best_r] = tech_pending.get(best_r, 0) + 1
+            tech_effective_load[best_r] = tech_effective_load.get(best_r, 0.0) + status_effective_weight(order['status'])
             tech_franja_counts.setdefault(best_r, {})
             fr = order.get('franja', '')
             tech_franja_counts[best_r][fr] = tech_franja_counts[best_r].get(fr, 0) + 1
@@ -1188,16 +1323,15 @@ def generate_suggestions(input_file, forced_hour=None):
 
                     dist = 0.0
                     if order.get('lat', 0) and order.get('lon', 0) and r in tech_locations:
-                        c = get_centroid(tech_locations[r])
-                        dist = haversine(order['lat'], order['lon'], c[0], c[1])
-                        if dist > MAX_ALLOWED_DISTANCE_KM:
+                        dist = estimate_distance_to_receiver(order, r, tech_all_orders, tech_locations)
+                        if dist is None or dist > MAX_ALLOWED_DISTANCE_KM:
                             continue
                     else:
                         ak = order.get('addr_key') or ""
                         if not ak or ak not in tech_addr_keys.get(r, set()):
                             continue
 
-                    score = tech_pending.get(r, 0) * 900 + tech_total.get(r, 0) * 400 + dist * 250
+                    score = tech_load_score(r, tech_pending, tech_total, tech_effective_load, tech_completion_credit_map, tech_franja_counts, tech_subzones) + dist * 300
                     if order.get('subzona') in tech_subzones.get(r, set()):
                         score -= 1500
 
@@ -1226,6 +1360,7 @@ def generate_suggestions(input_file, forced_hour=None):
 
                 tech_total[tname] = max(0, tech_total.get(tname, 0) - 1)
                 tech_pending[tname] = max(0, tech_pending.get(tname, 0) - 1)
+                tech_effective_load[tname] = max(0.0, tech_effective_load.get(tname, 0.0) - status_effective_weight(order['status']))
                 if tname in tech_franja_counts:
                     cnt = tech_franja_counts[tname].get(order.get('franja',''), 0)
                     if cnt <= 1:
@@ -1235,6 +1370,7 @@ def generate_suggestions(input_file, forced_hour=None):
 
                 tech_total[best_r] = tech_total.get(best_r, 0) + 1
                 tech_pending[best_r] = tech_pending.get(best_r, 0) + 1
+                tech_effective_load[best_r] = tech_effective_load.get(best_r, 0.0) + status_effective_weight(order['status'])
                 tech_franja_counts.setdefault(best_r, {})
                 tech_franja_counts[best_r][order.get('franja','')] = tech_franja_counts[best_r].get(order.get('franja',''), 0) + 1
 
@@ -1329,7 +1465,7 @@ def generate_suggestions(input_file, forced_hour=None):
                     allow_same_unit_override=False,
                     same_unit=False
                 )
-                if can_ok:
+                if can_ok and receivers_interzone_count.get(donor, 0) < MAX_INTERZONE_ASSIGNMENTS_PER_TECH and zone_rank_from(z_low, z_high) == 1:
                     suggestions.append({
                         'zona': f"{z_high} (APOYO PROACTIVO)",
                         'subzona': target.get('subzona',''),
@@ -1348,6 +1484,7 @@ def generate_suggestions(input_file, forced_hour=None):
                         )
                     })
                     techs_moved_from_zone.add(donor)
+                    receivers_interzone_count[donor] = receivers_interzone_count.get(donor, 0) + 1
 
                     if source_label == "SIN_ASIGNAR":
                         try:
@@ -1378,6 +1515,7 @@ def generate_suggestions(input_file, forced_hour=None):
                         )
                     })
                     techs_moved_from_zone.add(donor)
+                    receivers_interzone_count[donor] = receivers_interzone_count.get(donor, 0) + 1
             else:
                 suggestions.append({
                     'zona': f"{z_high} (APOYO PROACTIVO)",
@@ -1397,6 +1535,7 @@ def generate_suggestions(input_file, forced_hour=None):
                     )
                 })
                 techs_moved_from_zone.add(donor)
+                receivers_interzone_count[donor] = receivers_interzone_count.get(donor, 0) + 1
     # ==========================================================
     # PASO 6: OPTIMIZACIÓN DE RUTA / UNIDAD + PROXIMIDAD + SWAPS
     # ==========================================================
@@ -1419,8 +1558,8 @@ def generate_suggestions(input_file, forced_hour=None):
             if abs(tech_pending.get(t1, 0) - tech_pending.get(t2, 0)) > 1:
                 continue
 
-            c1 = get_centroid(tech_locations.get(t1, [(0, 0)]))
-            c2 = get_centroid(tech_locations.get(t2, [(0, 0)]))
+            c1 = get_tech_reference_point(t1, tech_all_orders, tech_locations)
+            c2 = get_tech_reference_point(t2, tech_all_orders, tech_locations)
 
             for o1 in list(tech_movable[t1]):
                 # si no hay coords, solo sugerimos si es misma unidad (addr_key) con un activo (lo cubre 6.0 fuera)
@@ -1470,12 +1609,10 @@ def generate_suggestions(input_file, forced_hour=None):
             z2 = tech_main_zone.get(t2, "SIN_ZONA").upper()
 
             if z1 != z2:
-                allowed_neighbors = ZONE_ADJACENCY.get(z1, [])
-                if z2 not in allowed_neighbors:
-                    continue
+                continue
 
-            c1 = get_centroid(tech_locations.get(t1, [(0, 0)]))
-            c2 = get_centroid(tech_locations.get(t2, [(0, 0)]))
+            c1 = get_tech_reference_point(t1, tech_all_orders, tech_locations)
+            c2 = get_tech_reference_point(t2, tech_all_orders, tech_locations)
 
             orders_t1 = list(tech_movable.get(t1, []))
             orders_t2 = list(tech_movable.get(t2, []))
@@ -1664,8 +1801,8 @@ def generate_suggestions(input_file, forced_hour=None):
     ws_alert.append(ah)
     style_header_row(ws_alert, len(ah))
 
-    priority_map = {'SOBRECARGA': 0, 'FRANJA EN RIESGO': 1, 'FRANJAS DUPLICADAS': 2,
-                    'EXCESO TARDE': 3, 'FRANJA AJUSTADA': 4, 'MULTI-ESTADO ACTIVO': 5}
+    priority_map = {'SOBRECARGA': 0, 'FRANJA EN RIESGO': 1, 'BAJO AVANCE RELATIVO': 2, 'FRANJAS DUPLICADAS': 3,
+                    'EXCESO TARDE': 4, 'FRANJA AJUSTADA': 5, 'MULTI-ESTADO ACTIVO': 6}
     alerts.sort(key=lambda a: priority_map.get(a['tipo'], 99))
 
     if alerts:
@@ -1674,7 +1811,7 @@ def generate_suggestions(input_file, forced_hour=None):
             ws_alert.append([a['tipo'], a['zona'], a['tecnico'], a['detalle']])
             if a['tipo'] in ['SOBRECARGA', 'FRANJA EN RIESGO']:
                 ws_alert.cell(row=row_num, column=1).fill = ALERT_FILL
-            elif a['tipo'] in ['FRANJAS DUPLICADAS', 'EXCESO TARDE', 'MULTI-ESTADO ACTIVO']:
+            elif a['tipo'] in ['BAJO AVANCE RELATIVO', 'FRANJAS DUPLICADAS', 'EXCESO TARDE', 'MULTI-ESTADO ACTIVO']:
                 ws_alert.cell(row=row_num, column=1).fill = WARN_FILL
     else:
         ws_alert.append(['OK', 'N/A', 'N/A', 'No se detectaron alertas'])

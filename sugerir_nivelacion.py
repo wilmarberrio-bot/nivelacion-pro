@@ -748,11 +748,22 @@ def generate_suggestions(input_file, forced_hour=None):
             tech_subzone_map.setdefault(t, {}).setdefault(sz, {})
             tech_subzone_map[t][sz][st] = tech_subzone_map[t][sz].get(st, 0) + 1
 
+        # ✅ Incluir técnicos sin pendientes (pendientes=0) pero con finalizadas en esta zona
+        # Para que la hoja "Distribucion por Tecnico" muestre también quién ya terminó todo.
+        techs_in_zone_all = sorted(set(d['tech'] for d in zone_data if d['tech'] != "SIN_ASIGNAR"))
+        for t0 in techs_in_zone_all:
+            if tech_pending.get(t0, 0) == 0 and tech_finalized.get(t0, 0) > 0:
+                tech_subzone_map.setdefault(t0, {})
+
         for t in sorted(tech_subzone_map.keys()):
+
             sz_map = tech_subzone_map[t]
             total_pending = sum(sum(v for v in sts.values()) for sts in sz_map.values())
             subzona_lines = []
+            if not sz_map:
+                subzona_lines.append("SIN PENDIENTES")
             for sz in sorted(sz_map.keys()):
+
                 sts = sz_map[sz]
                 estados_str = "  /  ".join(f"{k}({v})" for k, v in sts.items())
                 subzona_lines.append(f"{sz}: {estados_str}")

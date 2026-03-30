@@ -24,10 +24,12 @@ MAX_IDEAL_LOAD = 5         # Carga ideal maxima por tecnico (LV)
 MAX_ABSOLUTE_LOAD = 6      # ✅ Confirmado: Lunes-Viernes
 MAX_ORDERS_PER_SLOT = 2    # Permitir solape como ultimo recurso
 MAX_DUPLICATED_SLOTS = 1   # Permitir maximo 1 franja duplicada (hard)
-MIN_IMBALANCE_TO_MOVE = 1
+MIN_IMBALANCE_TO_MOVE = 2
+MIN_ROUTE_SAVINGS_KM = 1.0
+MIN_ROUTE_SCORE_BENEFIT = 350
 ORDER_DURATION_HOURS = 1.0
 MAX_ORDER_DURATION_HOURS = 1.5
-MAX_ALLOWED_DISTANCE_KM = 5.0
+MAX_ALLOWED_DISTANCE_KM = 8.0
 MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
 ZONE_ONLY_NO_COORDS_PENALTY = 50000
 INTERZONE_DISTANCE_PENALTY = 1500
@@ -345,6 +347,54 @@ def tech_load_score(tech_name, tech_pending, tech_total, tech_effective_load, te
         + subzone_count * 120
         - tech_completion_credit_map.get(tech_name, 0.0) * 180
     )
+
+def estimate_route_savings_km(order, donor, receiver, tech_all_orders, tech_locations):
+    receiver_dist = estimate_distance_to_receiver(order, receiver, tech_all_orders, tech_locations)
+    donor_dist = None
+    if donor and donor != "SIN_ASIGNAR":
+        donor_dist = estimate_distance_to_receiver(order, donor, tech_all_orders, tech_locations)
+
+    if receiver_dist is None and donor_dist is None:
+        return None, donor_dist, receiver_dist
+    if receiver_dist is None:
+        return None, donor_dist, receiver_dist
+    if donor_dist is None:
+        return receiver_dist * 0.25, donor_dist, receiver_dist
+    return donor_dist - receiver_dist, donor_dist, receiver_dist
+
+def should_allow_move_by_balance_or_route(order, donor, receiver, donor_eff, recv_eff, tech_pending, tech_total, tech_all_orders, tech_locations, current_hour):
+    load_gap = donor_eff - recv_eff
+    savings_km, donor_dist, receiver_dist = estimate_route_savings_km(order, donor, receiver, tech_all_orders, tech_locations)
+
+    # Regla: si la diferencia real es menor a 2, solo mover por mejora clara de ruta/franja.
+    route_override = False
+    route_reason = ""
+    if load_gap >= MIN_IMBALANCE_TO_MOVE:
+        route_override = True
+        route_reason = f"desbalance={load_gap:.2f}"
+    else:
+        if savings_km is not None and savings_km >= MIN_ROUTE_SAVINGS_KM:
+            route_override = True
+            route_reason = f"ahorro_ruta={savings_km:.2f}km"
+        else:
+            arr_d_n, arr_d_m, f_start, f_end = estimate_arrival_for_franja(tech_all_orders.get(donor, []), order.get('franja'), current_hour) if donor and donor != "SIN_ASIGNAR" else (None, None, None, None)
+            arr_r_n, arr_r_m, _, _ = estimate_arrival_for_franja(tech_all_orders.get(receiver, []), order.get('franja'), current_hour)
+            donor_late = 0.0
+            recv_late = 0.0
+            if f_end is not None:
+                if arr_d_m is not None and arr_d_m > f_end:
+                    donor_late = arr_d_m - f_end
+                elif arr_d_n is not None and arr_d_n > f_end:
+                    donor_late = arr_d_n - f_end
+                if arr_r_m is not None and arr_r_m > f_end:
+                    recv_late = arr_r_m - f_end
+                elif arr_r_n is not None and arr_r_n > f_end:
+                    recv_late = arr_r_n - f_end
+            if donor_late > recv_late + 0.20:
+                route_override = True
+                route_reason = f"mejora_franja={donor_late-recv_late:.2f}h"
+
+    return route_override, route_reason, savings_km, donor_dist, receiver_dist, load_gap
 
 def parse_franja_hours(franja_str):
     if not franja_str or franja_str == 'Sin Franja':
@@ -996,7 +1046,10 @@ def generate_suggestions(input_file, forced_hour=None):
 
                         donor_eff = tech_effective_load.get(donor, tech_pending.get(donor, 0)) if donor != "SIN_ASIGNAR" else None
                         recv_eff = tech_effective_load.get(r, tech_pending.get(r, 0))
-                        if donor != "SIN_ASIGNAR" and (donor_eff - recv_eff) < 0.55:
+                        move_ok, move_reason, savings_km, donor_dist, receiver_dist, load_gap = should_allow_move_by_balance_or_route(
+                            order, donor, r, donor_eff, recv_eff, tech_pending, tech_total, tech_all_orders, tech_locations, current_hour
+                        ) if donor != "SIN_ASIGNAR" else (True, "sin_asignar", None, None, None, None)
+                        if donor != "SIN_ASIGNAR" and not move_ok:
                             continue
 
                         can_handle, handle_reason = can_tech_handle_franja(
@@ -1037,6 +1090,15 @@ def generate_suggestions(input_file, forced_hour=None):
                         else:
                             dist = 0.0
 
+                        route_bonus = 0
+                        if donor != "SIN_ASIGNAR":
+                            if savings_km is not None:
+                                route_bonus = min(2600, savings_km * 900)
+                                score -= route_bonus
+                            elif donor_dist is not None and receiver_dist is not None and receiver_dist < donor_dist:
+                                route_bonus = min(1800, (donor_dist - receiver_dist) * 700)
+                                score -= route_bonus
+
                         bonus_sub = 0
                         if order['subzona'] in tech_subzones.get(r, set()):
                             bonus_sub = -2400
@@ -1064,7 +1126,7 @@ def generate_suggestions(input_file, forced_hour=None):
                         if score < best_score:
                             best_score = score
                             best_receiver = r
-                            best_detail = f"score={score:.0f} | eff_load={recv_eff:.2f} | total={tech_total.get(r,0)} | dist={dist:.2f} | bonus_sub={bonus_sub} | late_pen={late_pen:.0f} | {handle_reason}"
+                            best_detail = f"score={score:.0f} | motivo={move_reason} | gap={load_gap if load_gap is not None else 'NA'} | ahorro_km={(savings_km if savings_km is not None else 0):.2f} | eff_load={recv_eff:.2f} | total={tech_total.get(r,0)} | dist={dist:.2f} | route_bonus={route_bonus:.0f} | bonus_sub={bonus_sub} | late_pen={late_pen:.0f} | {handle_reason}"
 
                     if pass_num == 2 and best_receiver:
                         donors_interzone_count[donor] = donors_interzone_count.get(donor, 0) + 1
@@ -1087,7 +1149,7 @@ def generate_suggestions(input_file, forced_hour=None):
                         'franja': order['franja'],
                         'address': order.get('address', ''),
                         'distancia_estimada': f"{dist_km:.2f} km",
-                        'alerta': f"Inter-Zona ({tech_main_zone.get(best_receiver)})" if is_interzone else ("Nivelacion Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar"),
+                        'alerta': f"Inter-Zona ({tech_main_zone.get(best_receiver)})" if is_interzone else ("Optimización Ruta / Carga" if donor != "SIN_ASIGNAR" else "Sin Asignar"),
                         'pendientes_origen': tech_pending.get(donor, 0),
                         'pendientes_destino': tech_pending.get(best_receiver, 0),
                         'justificacion': best_detail
@@ -1152,6 +1214,7 @@ def generate_suggestions(input_file, forced_hour=None):
                 if dist > MAX_ALLOWED_DISTANCE_KM:
                     return float('inf')
                 score += dist * 300
+                score -= min(2200, max(0, (MAX_ALLOWED_DISTANCE_KM - dist)) * 180)
             return score
 
         for order in list(remaining_unassigned):

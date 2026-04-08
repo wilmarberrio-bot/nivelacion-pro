@@ -1,5 +1,5 @@
 from datetime import datetime
-
+from openpyxl.styles import PatternFill, Font, Border, Side
 try:
     import pytz
     TZ_BOGOTA = pytz.timezone("America/Bogota")
@@ -80,7 +80,9 @@ ALERT_FILL = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='so
 SUCCESS_FILL = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
 WARN_FILL = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
 THIN_BORDER = Border(
-    left=Side(style='thin'), right=Side(style='thin'),
-    top=Side(style='thin'), bottom=Side(style='thin')
+  left=Side(style='thin'),
+    right=Side(style='thin'),
+    top=Side(style='thin'),
+    bottom=Side(style='thin')
 )
 

@@ -75,8 +75,11 @@ def analyze():
         else:
             return jsonify({'status': 'error', 'message': msg})
 
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f"Error interno: {str(e)}"})
+   except Exception as e:
+    import traceback
+    print("=== ERROR EN /analyze ===")
+    print(traceback.format_exc())
+    return jsonify({'status': 'error', 'message': f"Error interno: {str(e)}"})
 
 @app.route('/download/<path:filename>')
 def download(filename):

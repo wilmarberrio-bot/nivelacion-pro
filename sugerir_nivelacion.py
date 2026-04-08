@@ -215,6 +215,51 @@ def generate_suggestions(input_file, forced_hour=None):
             })
         except Exception:
             pass
+
+    def is_manual_opportunity_discard(item):
+        motivo = str(item.get("motivo", "")).strip().lower()
+        detalle = str(item.get("detalle", "")).strip().lower()
+        destino = str(item.get("destino", "")).strip().lower()
+        zona = str(item.get("zona", "")).strip().lower()
+        subzona = str(item.get("subzona", "")).strip().lower()
+
+        hard_discards = {
+            "destino_excede_maximo",
+            "zona_no_vecina",
+            "donante_ya_salio_de_zona",
+            "distancia_excesiva",
+            "sin_coords_subzona_no_valida",
+            "origen_sin_capacidad",
+            "destino_interzona_al_limite",
+            "interzona_no_conviene",
+            "origen_sin_capacidad",
+        }
+        if motivo in hard_discards:
+            return False
+
+        if motivo == "sin_destino_viable":
+            return False
+
+        if motivo == "sin_beneficio_real":
+            useful_tokens = ["ahorro_ruta=", "mejora_franja=", "desbalance="]
+            if not any(t in detalle for t in useful_tokens):
+                return False
+            if "proteger_tecnico_eficiente" in detalle:
+                return False
+            return True
+
+        if motivo == "franja_no_viable":
+            if "ok (excepcion: misma unidad)" in detalle:
+                return True
+            if "no alcanza:" in detalle:
+                return False
+            return bool(destino)
+
+        if motivo == "apoyo_interzona_descartado":
+            return "zona no vecina" not in detalle and "ya hizo apoyo interzona" not in detalle
+
+        return False
+
     zone_summaries = []
     subzone_summaries = []
 
@@ -1389,16 +1434,18 @@ def generate_suggestions(input_file, forced_hour=None):
     auto_fit_columns(ws_sug)
 
 
-    ws_disc = wb_out.create_sheet("Movimientos Descartados")
-    dh = ['Zona', 'Subzona', 'Direccion', 'ID Orden', 'Origen', 'Destino Evaluado', 'Franja', 'Motivo', 'Detalle']
-    ws_disc.append(dh)
-    style_header_row(ws_disc, len(dh))
-    for d in discarded_suggestions:
-        ws_disc.append([
-            d.get('zona',''), d.get('subzona',''), d.get('direccion',''), d.get('order_id',''),
-            d.get('origen',''), d.get('destino',''), d.get('franja',''), d.get('motivo',''), d.get('detalle','')
-        ])
-    auto_fit_columns(ws_disc)
+    manual_opportunities = [d for d in discarded_suggestions if is_manual_opportunity_discard(d)]
+    if manual_opportunities:
+        ws_disc = wb_out.create_sheet("Oportunidades Manuales")
+        dh = ['Zona', 'Subzona', 'Direccion', 'ID Orden', 'Origen', 'Destino Sugerido', 'Franja', 'Motivo', 'Detalle']
+        ws_disc.append(dh)
+        style_header_row(ws_disc, len(dh))
+        for d in manual_opportunities:
+            ws_disc.append([
+                d.get('zona',''), d.get('subzona',''), d.get('direccion',''), d.get('order_id',''),
+                d.get('origen',''), d.get('destino',''), d.get('franja',''), d.get('motivo',''), d.get('detalle','')
+            ])
+        auto_fit_columns(ws_disc)
 
     ws_alert = wb_out.create_sheet("Alertas")
     ah = ['Tipo', 'Zona', 'Tecnico', 'Detalle']
@@ -1432,7 +1479,7 @@ def generate_suggestions(input_file, forced_hour=None):
             "Nivelacion completada.",
             f"  Sugerencias generadas: {len(suggestions)}",
             f"  Alertas detectadas: {len(alerts)}",
-            f"  Movimientos descartados: {len(discarded_suggestions)}",
+            f"  Oportunidades manuales: {len(manual_opportunities)}",
             f"  Zonas analizadas: {len(zones)}",
             f"  Total ordenes: {len(data)}",
         ]

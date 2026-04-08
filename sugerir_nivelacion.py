@@ -1,11 +1,23 @@
 import openpyxl
 import os
+import math
+from datetime import datetime
+
 from config import *
 from normalization import *
 from status_rules import *
 from geo_utils import *
 from routing_rules import *
-from excel_export import *
+from excel_export import (
+    style_header_row,
+    auto_fit_columns,
+    ALERT_FILL,
+    SUCCESS_FILL,
+    WARN_FILL,
+    Alignment,
+)
+
+print(">>> CARGANDO sugerir_nivelacion DESDE:", __file__)
 
 def generate_suggestions(input_file, forced_hour=None):
     _now = now_bogota()
@@ -241,6 +253,13 @@ def generate_suggestions(input_file, forced_hour=None):
     donors_interzone_count = {}
     receivers_interzone_count = {}
     techs_moved_from_zone = set()
+
+    # Mapa base de técnicos por zona para validaciones inter-zona tempranas
+    zone_techs = {}
+    for t, zname in tech_main_zone.items():
+        if t == "SIN_ASIGNAR" or not zname:
+            continue
+        zone_techs.setdefault(zname, []).append(t)
 
     # =========================
     # Analisis por zona (alertas + nivelación principal)
@@ -1391,4 +1410,4 @@ def generate_suggestions(input_file, forced_hour=None):
 
         return "\n".join(msg_parts), output_path
     except Exception as e:
-        return f"Error guardando reporte: {str(e)}", None
+        return f"Error guardando reporte: {str(e)}", None        return f"Error guardando reporte: {str(e)}", None

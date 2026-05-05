@@ -84,6 +84,12 @@ def post_upload():
         return jsonify({"status":"error","message":"Solo .xlsx"}),400
     try:
         orders=load_from_bytes(f.read(),f.filename); r=run_leveling(orders); _ss["last_result"]=r
+        # Corte automatico en cada subida de Excel
+        try:
+            from services.snapshot_service import registrar_corte
+            registrar_corte(orders)
+        except Exception:
+            pass
         return jsonify({"status":"ok","fuente":"excel","archivo":f.filename,"total_ordenes":r["resumen"]["total_ordenes"],"generado_en":r.get("generado_en")})
     except Exception as e: logger.exception("Error upload"); return jsonify({"status":"error","message":str(e)}),500
 @api_bp.get("/cache")

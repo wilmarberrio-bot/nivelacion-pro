@@ -16,7 +16,9 @@ app = Flask(__name__)
 app.config["JSON_ENSURE_ASCII"] = False
 
 from routes.api import api_bp
+from routes.reports import reports_bp
 app.register_blueprint(api_bp)
+app.register_blueprint(reports_bp)
 
 @app.route("/")
 def index():

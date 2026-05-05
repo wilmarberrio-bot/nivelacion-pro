@@ -50,41 +50,32 @@ def _hora_label(dt: datetime) -> str:
 
 
 def _clasificar(orders: list) -> dict:
-    """
-    Clasifica órdenes por estado y por franja.
-    Guarda IDs de programadas para detectar reprogramadas entre cortes.
-    """
+    """Clasifica ordenes por estado, franja y tipo de cita."""
     por_estado = {g: 0 for g in _GRUPOS}
     por_franja: dict = {}
-
+    por_tipo:   dict = {}
     ids_programadas = set()
     ids_todos = set()
-
     for o in orders:
-        est = str(o.get("estado", "")).strip().lower()
+        if not isinstance(o, dict):
+            continue
+        est    = str(o.get("estado", "")).strip().lower()
         franja = str(o.get("franja", "Sin Franja")).strip() or "Sin Franja"
-        oid = str(o.get("id", ""))
-
+        tipo   = str(o.get("tipo", "otro")).strip().lower() or "otro"
+        oid    = str(o.get("id", ""))
         ids_todos.add(oid)
-
         for grupo, estados in _GRUPOS.items():
             if est in estados:
                 por_estado[grupo] += 1
                 break
-
         if est in {"programado", "programada"}:
             ids_programadas.add(oid)
-
         por_franja[franja] = por_franja.get(franja, 0) + 1
-
-    return {
-        "total":           len(orders),
-        "por_estado":      por_estado,
-        "por_franja":      dict(sorted(por_franja.items())),
-        "_ids_prog":       list(ids_programadas),
-        "_ids_todos":      list(ids_todos),
-        "reprogramadas":   0,   # Se calcula comparando con el corte anterior
-    }
+        por_tipo[tipo] = por_tipo.get(tipo, 0) + 1
+    return {"total":len(orders),"por_estado":por_estado,
+            "por_franja":dict(sorted(por_franja.items())),
+            "por_tipo":dict(sorted(por_tipo.items())),
+            "_ids_prog":list(ids_programadas),"_ids_todos":list(ids_todos),"reprogramadas":0}
 
 
 def registrar_corte(orders: list, label: str = None) -> dict:
@@ -117,6 +108,7 @@ def registrar_corte(orders: list, label: str = None) -> dict:
         "total":        stats["total"],
         "por_estado":   stats["por_estado"],
         "por_franja":   stats["por_franja"],
+        "por_tipo":     stats["por_tipo"],
         "reprogramadas": stats["reprogramadas"],
         "_ids_prog":    stats["_ids_prog"],
         "_ids_todos":   stats["_ids_todos"],

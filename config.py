@@ -1,88 +1,96 @@
+"""
+config.py - Configuracion central de Nivelacion Pro Web
+Sin dependencias de openpyxl. Solo constantes operativas y variables de entorno.
+"""
+import os
 from datetime import datetime
-from openpyxl.styles import PatternFill, Font, Border, Side
+
 try:
     import pytz
     TZ_BOGOTA = pytz.timezone("America/Bogota")
-
     def now_bogota():
         return datetime.now(TZ_BOGOTA)
 except ImportError:
     def now_bogota():
         return datetime.now()
 
-# =========================
-# CONFIGURACION BASE (LV)
-# =========================
-# =========================
-# CONFIGURACION BASE (LV)
-# =========================
-MAX_IDEAL_LOAD = 5         # Carga ideal maxima por tecnico (LV)
-MAX_ABSOLUTE_LOAD = 6      # ✅ Confirmado: Lunes-Viernes
-MAX_ORDERS_PER_SLOT = 2    # Permitir solape como ultimo recurso
-MAX_DUPLICATED_SLOTS = 1   # Permitir maximo 1 franja duplicada (hard)
-MIN_IMBALANCE_TO_MOVE = 2
-MIN_ROUTE_SAVINGS_KM = 1.0
-MIN_ROUTE_SCORE_BENEFIT = 350
-MIN_ROUTE_SAVINGS_PCT = 0.30
-EFFICIENT_TECH_PROTECTION_SCORE = 0.85
-MAX_SUBZONES_SOFT = 3
-FRAGMENTATION_PENALTY = 900
-ORDER_DURATION_HOURS = 1.0
-MAX_ORDER_DURATION_HOURS = 1.5
-MAX_ALLOWED_DISTANCE_KM = 8.0
-MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
-ZONE_ONLY_NO_COORDS_PENALTY = 50000
-INTERZONE_DISTANCE_PENALTY = 1500
+# ── Metabase ──────────────────────────────────────────────────────────────
+METABASE_URL      = os.environ.get("METABASE_URL",      "https://metabase.somosinternet.com")
+METABASE_USER     = os.environ.get("METABASE_USER",     "")
+METABASE_PASSWORD = os.environ.get("METABASE_PASSWORD", "")
+METABASE_CARD_ID  = int(os.environ.get("METABASE_CARD_ID", "26359"))
+METABASE_API_KEY  = os.environ.get("METABASE_API_KEY",  "")
 
-# Optimización por edificio / swaps
-NEARBY_BUILDING_RADIUS_KM = 0.25            # 250m cuenta como misma unidad si hay coords
-MAX_SWAP_DISTANCE_INCREASE_KM = 2.0         # el técnico que recibe el swap no debe empeorar más de 2km
-MIN_SAVED_KM_FOR_SWAP = 0.5                 # ahorro mínimo para sugerir swaps en misma zona
+# ── Franjas horarias operativas ───────────────────────────────────────────
+FRANJAS = [
+    "08:00-09:30",
+    "10:00-11:30",
+    "13:00-14:30",
+    "14:30-16:00",
+]
 
+# ── Estados ───────────────────────────────────────────────────────────────
+MOVABLE_STATUSES = ["por programar", "programado", "programada"]
 
-ZONE_ADJACENCY = {
-    'MEDELLIN': ['BELLO', 'ENVIGADO', 'ITAGUI', 'SABANETA'],
-    'BELLO': ['MEDELLIN'],
-    'ENVIGADO': ['MEDELLIN', 'SABANETA', 'ITAGUI'],
-    'ITAGUI': ['MEDELLIN', 'ENVIGADO', 'SABANETA', 'LA ESTRELLA'],
-    'SABANETA': ['ENVIGADO', 'ITAGUI', 'LA ESTRELLA', 'CALDAS', 'MEDELLIN'],
-    'LA ESTRELLA': ['ITAGUI', 'SABANETA', 'CALDAS'],
-    'CALDAS': ['LA ESTRELLA', 'SABANETA'],
-    'RIONEGRO': [],
-}
+BLOCKED_STATUSES = [
+    "en camino", "en sitio", "mac enviada", "mac principal enviada",
+    "dispositivos subidos", "dispositivos cargados",
+    "por auditar", "finalizado", "finalizada", "cerrado", "cerrada",
+    "cancelado", "cancelada",
+]
 
-MOVABLE_STATUSES = ['programado', 'programada', 'por programar']
+NEAR_FINISH_STATUSES = [
+    "mac enviada", "mac principal enviada",
+    "dispositivos subidos", "dispositivos cargados",
+]
+
 FINALIZED_STATUSES = [
-    'finalizado', 'finalizada', 'por auditar', 'cancelado', 'cancelada',
-    'cerrado', 'cerrada', 'completado', 'completada'
+    "finalizado", "finalizada", "por auditar", "cerrado", "cerrada",
 ]
 
 STATUS_PROGRESS = {
-    'programado': 0,
-    'programada': 0,
-    'inbound': 1,
-    'en sitio': 2,
-    'iniciado': 3,
-    'iniciada': 3,
-    'mac principal enviada': 4,
-    'dispositivos cargados': 5,
+    "por programar": 0, "programado": 0, "programada": 0,
+    "en camino": 1, "en sitio": 2,
+    "iniciado": 3, "iniciada": 3,
+    "mac enviada": 4, "mac principal enviada": 4,
+    "dispositivos subidos": 5, "dispositivos cargados": 5,
+    "por auditar": 6, "finalizado": 7, "finalizada": 7,
 }
 
-NEAR_FINISH_STATUSES = ['dispositivos cargados', 'mac principal enviada']
+# ── Umbrales operativos ───────────────────────────────────────────────────
+MAX_IDEAL_LOAD           = 5
+MAX_ABSOLUTE_LOAD        = 6
+MAX_ORDERS_PER_SLOT      = 2
+MAX_DUPLICATED_SLOTS     = 1
+MIN_IMBALANCE_TO_MOVE    = 2
+ORDER_DURATION_HOURS     = 1.0
+MAX_ORDER_DURATION_HOURS = 1.5
+MAX_ALLOWED_DISTANCE_KM  = 8.0
+MAX_SUBZONES_SOFT        = 3
+ONSITE_ALERT_MINUTES     = int(os.environ.get("ONSITE_ALERT_MINUTES", "90"))
+OVERLOAD_PER_SLOT        = 2
 
+# ── Scoring ───────────────────────────────────────────────────────────────
+FRAGMENTATION_PENALTY             = 900
+INTERZONE_DISTANCE_PENALTY        = 1500
+ZONE_ONLY_NO_COORDS_PENALTY       = 50000
+EFFICIENT_TECH_PROTECTION_SCORE   = 0.85
+MIN_ROUTE_SAVINGS_KM              = 1.0
+MIN_ROUTE_SAVINGS_PCT             = 0.30
+NEARBY_BUILDING_RADIUS_KM         = 0.25
+MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
 
-# =========================
-# Estilos Excel
-# =========================
-HEADER_FILL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
-HEADER_FONT = Font(color='FFFFFF', bold=True, size=11)
-ALERT_FILL = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
-SUCCESS_FILL = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
-WARN_FILL = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
-THIN_BORDER = Border(
-  left=Side(style='thin'),
-    right=Side(style='thin'),
-    top=Side(style='thin'),
-    bottom=Side(style='thin')
-)
+# ── Zonas adyacentes ──────────────────────────────────────────────────────
+ZONE_ADJACENCY = {
+    "MEDELLIN":    ["BELLO", "ENVIGADO", "ITAGUI", "SABANETA"],
+    "BELLO":       ["MEDELLIN"],
+    "ENVIGADO":    ["MEDELLIN", "SABANETA", "ITAGUI"],
+    "ITAGUI":      ["MEDELLIN", "ENVIGADO", "SABANETA", "LA ESTRELLA"],
+    "SABANETA":    ["ENVIGADO", "ITAGUI", "LA ESTRELLA", "CALDAS", "MEDELLIN"],
+    "LA ESTRELLA": ["ITAGUI", "SABANETA", "CALDAS"],
+    "CALDAS":      ["LA ESTRELLA", "SABANETA"],
+    "RIONEGRO":    [],
+}
 
+# ── Cache ─────────────────────────────────────────────────────────────────
+DATA_CACHE_TTL = int(os.environ.get("DATA_CACHE_TTL", "300"))

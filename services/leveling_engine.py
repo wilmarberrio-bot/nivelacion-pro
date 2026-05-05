@@ -28,6 +28,9 @@ def _count_dup(fc): return sum(1 for c in fc.values() if c >= 2)
 
 def _parse_dt(s):
     if not s: return None
+    if hasattr(s, "replace"):
+        try: return s.replace(tzinfo=None)
+        except: pass
     for fmt in ("%Y-%m-%d %H:%M:%S","%Y-%m-%dT%H:%M:%S","%Y-%m-%d %H:%M","%d/%m/%Y %H:%M"):
         try: return datetime.strptime(str(s).strip()[:19],fmt)
         except: pass
@@ -81,7 +84,7 @@ def _alerts(orders,idx,now_dt):
         if norm_status(o["estado"])=="en sitio":
             upd=_parse_dt(o.get("updated_at",""))
             if upd:
-                mins=(now_dt-upd).total_seconds()/60
+                mins=(now_dt.replace(tzinfo=None)-upd).total_seconds()/60
                 if mins>ONSITE_ALERT_MINUTES:
                     alerts.append({"tipo":"EN_SITIO_PROLONGADO","severidad":"critica" if mins>ONSITE_ALERT_MINUTES*2 else "alta",
                         "orden":o["id"],"tecnico":o["tecnico"],"franja":o["franja"],"zona":o["zona"],

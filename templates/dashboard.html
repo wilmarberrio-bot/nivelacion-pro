@@ -36,6 +36,9 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 .tc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:10px;margin-bottom:16px}
 .banner{background:rgba(210,153,34,.1);border:1px solid var(--y);border-radius:7px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:var(--y);display:none}
 .frow{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.pane{display:none}.pane.on{display:block}
+.bl-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid var(--r);background:var(--r-bg,rgba(248,81,73,.1));color:var(--r);font-weight:500}
+.bl-btn:hover{background:var(--r)}
 </style></head><body>
 <div class="top"><h1>⚡ Nivelacion Pro <span class="dot"></span></h1><span class="sp"></span>
 <span <select id="g-zona" onchange="applyGF()" title="Filtrar por zona" style="background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px;max-width:120px"><option value="">Todas las zonas</option></select>
@@ -61,13 +64,13 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 </div>
 <div class="ct">
 <div id="banner" class="banner"></div>
-<div class="pane on" id="pane-r"><div class="cards" id="cr"><div style="color:var(--t2);padding:16px">Cargando... (si tarda, sube un Excel con 📂)</div></div><div id="rfr"></div></div>
+<div class="pane" id="pane-r"><div class="cards" id="cr"><div style="color:var(--t2);padding:16px">Cargando... (si tarda, sube un Excel con 📂)</div></div><div id="rfr"></div></div>
 <div class="pane" id="pane-t"><div class="frow"><input type="text" id="ftn" placeholder="Buscar tecnico..." oninput="rT()" style="width:170px"><select id="fts" onchange="rT()"><option value="">Todos</option><option value="s">Sobrecargados</option><option value="c">Con capacidad</option></select></div><div class="tc-grid" id="tg"></div></div>
 <div class="pane" id="pane-f"><div class="fc-grid" id="fg"></div></div>
 <div class="pane" id="pane-m"><div class="frow"><select id="fmt" onchange="rM()"><option value="">Todos tecnicos</option></select><select id="fmf" onchange="rM()"><option value="">Todas franjas</option></select><input type="text" id="fms" placeholder="Buscar..." oninput="rM()" style="width:150px"></div><div class="sec">Movibles<span class="cnt" id="mc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Subzona</th><th>Direccion</th></tr></thead><tbody id="mb"></tbody></table></div></div>
 <div class="pane" id="pane-b"><div class="frow"><select id="fbt" onchange="rB()"><option value="">Todos tecnicos</option></select></div><div class="sec">Bloqueadas<span class="cnt" id="bc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Motivo</th></tr></thead><tbody id="blb"></tbody></table></div></div>
 <div class="pane" id="pane-a"><div class="frow"><select id="fas" onchange="rA()"><option value="">Toda severidad</option><option value="critica">🔴 Critica</option><option value="alta">🟠 Alta</option><option value="media">🟡 Media</option></select></div><div class="sec">Alertas<span class="cnt" id="ac">0</span></div><div id="al"></div></div>
-<div class="pane" id="pane-s"><div class="frow"><select id="fse" onchange="rS()"><option value="pendiente">Pendientes</option><option value="aplicada">Aplicadas</option><option value="descartada">Descartadas</option><option value="todas">Todas</option></select><select id="fsr" onchange="rS()"><option value="">Todo riesgo</option><option value="bajo">🟢 Bajo</option><option value="alto">🔴 Alto</option></select><span class="sp" style="font-size:12px;color:var(--t2)">El coordinador decide. Solo en sesion.</span></div><div class="sec">Sugerencias<span class="cnt" id="sc2">0</span></div><div id="sl"></div></div>
+<div class="pane on" id="pane-s"><div class="frow"><select id="fse" onchange="rS()"><option value="pendiente">Pendientes</option><option value="aplicada">Aplicadas</option><option value="descartada">Descartadas</option><option value="todas">Todas</option></select><select id="fsr" onchange="rS()"><option value="">Todo riesgo</option><option value="bajo">🟢 Bajo</option><option value="alto">🔴 Alto</option></select><span class="sp" style="font-size:12px;color:var(--t2)">El coordinador decide. Solo en sesion.</span></div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 2px;border-top:1px solid var(--b);margin-top:4px"><span style="font-size:12px;color:var(--t2);white-space:nowrap">🚫 Lista negra:</span><input type="text" id="bl-inp" list="bl-techs" placeholder="Nombre técnico a excluir..." style="flex:1;min-width:160px;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px"><datalist id="bl-techs"></datalist><button onclick="addBLI()" style="background:var(--bl,#388bfd);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap">+ Excluir</button><span id="bl-tags" style="display:flex;gap:4px;flex-wrap:wrap"></span></div><div class="sec">Sugerencias<span class="cnt" id="sc2">0</span></div><div id="sl"></div></div>
 </div></div><div class="pane" id="pane-rep"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button onclick="tomarCorte()" id="btn-corte" style="background:var(--bl);color:#fff;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none">📸 Tomar corte ahora</button><button onclick="exportarReporte()" id="btn-exp" style="background:transparent;border:1px solid var(--b);color:var(--t2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer">📥 Descargar Excel</button><span style="font-size:12px;color:var(--t2)">Cada subida del Excel registra un corte automáticamente</span><select id="rep-fecha" onchange="cargarReporte()" style="margin-left:auto;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:5px 10px;font-size:13px"><option value="">Hoy</option></select></div><div id="rep-content"><div style="padding:40px;text-align:center"><div style="font-size:36px;opacity:.4">📊</div><div>Sin cortes registrados hoy</div><div style="font-size:12px;margin-top:6px;color:var(--t2)">Cada vez que subes el Excel se registra un corte</div></div></div></div><script>
 let D=null,SS={applied:{},dismissed:{}};
 const SIC={"movible":"bm","bloqueado":"bb","avanzado":"ba","finalizado":"bb"};
@@ -176,10 +179,30 @@ async function removeBL(t){
   var d=await r.json();_bl=d.blacklist||[];updateBLbadge();rS();toast('✅ '+e(t)+' removido de lista negra');}catch(err){toast('Error: '+err.message,'err');}
 }
 function updateBLbadge(){
-  var bd=document.getElementById('bl-badge');
-  if(bd){if(_bl.length>0){bd.textContent='🚫 '+_bl.length+' excluidos';bd.style.display='';}else bd.style.display='none';}
+  var bd=document.getElementById('bl-active');
+  if(bd){bd.textContent=_bl.length>0?'('+_bl.length+' excluidos)':'';}
+  renderBLtags();
+  fillBLdatalist();
 }
 
+
+function addBLI(){
+  var t=(document.getElementById('bl-inp')?.value||'').trim();
+  if(!t)return;
+  document.getElementById('bl-inp').value='';
+  addBL(t);
+}
+function renderBLtags(){
+  var tags=document.getElementById('bl-tags');
+  if(!tags)return;
+  tags.innerHTML=_bl.map(t=>'<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(248,81,73,.15);color:#f85149;border:1px solid rgba(248,81,73,.3);border-radius:4px;padding:2px 7px;font-size:11px">'+e(t)+'<button onclick="removeBL(''+e(t)+'')" style="background:none;border:none;color:#f85149;cursor:pointer;font-size:12px;padding:0;line-height:1">×</button></span>').join('');
+}
+function fillBLdatalist(){
+  var D=window.D;if(!D)return;
+  var ts=[...new Set((D.carga_por_tecnico||[]).map(t=>t.tecnico))].sort();
+  var dl=document.getElementById('bl-techs');
+  if(dl)dl.innerHTML=ts.map(t=>'<option value="'+e(t)+'">').join('');
+}
 document.addEventListener('DOMContentLoaded',()=>{
   load();
   loadBL();

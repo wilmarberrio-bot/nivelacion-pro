@@ -194,8 +194,10 @@ function addBLI(){
 }
 function renderBLtags(){
   var tags=document.getElementById('bl-tags');
-  if(!tags)return;
-  tags.innerHTML=_bl.map(t=>'<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(248,81,73,.15);color:#f85149;border:1px solid rgba(248,81,73,.3);border-radius:4px;padding:2px 7px;font-size:11px">'+e(t)+'<button onclick="removeBL(''+e(t)+'')" style="background:none;border:none;color:#f85149;cursor:pointer;font-size:12px;padding:0;line-height:1">×</button></span>').join('');
+  if(!tags||!_bl)return;
+  tags.innerHTML=_bl.map(function(t){
+    return '<span style="display:inline-flex;align-items:center;gap:3px;background:rgba(248,81,73,.1);color:#f85149;border:1px solid rgba(248,81,73,.3);border-radius:4px;padding:2px 7px;font-size:11px">'+e(t)+'<button data-tech="'+e(t)+'" onclick="removeBL(this.dataset.tech)" style="background:none;border:none;color:#f85149;cursor:pointer;font-size:13px;padding:0 0 0 3px;line-height:1">x</button></span>';
+  }).join('');
 }
 function fillBLdatalist(){
   var D=window.D;if(!D)return;

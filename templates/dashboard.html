@@ -38,20 +38,26 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 .frow{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
 </style></head><body>
 <div class="top"><h1>⚡ Nivelacion Pro <span class="dot"></span></h1><span class="sp"></span>
-<span id="lu" style="font-size:12px;color:var(--t2)">—</span>
+<span <select id="g-zona" onchange="applyGF()" title="Filtrar por zona" style="background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px;max-width:120px"><option value="">Todas las zonas</option></select>
+  <select id="g-subzona" onchange="applyGF()" title="Filtrar por subzona" style="background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px;max-width:130px"><option value="">Todas las subzonas</option></select>
+  id="lu" style="font-size:12px;color:var(--t2)">—</span>
 <button class="btn bp" onclick="refresh()" id="rb">↻ Actualizar</button>
 <label class="btn bgh" for="xf">📂 Excel</label>
 <input type="file" id="xf" accept=".xlsx" style="display:none" onchange="upload(this)">
 </div>
 <div class="main">
 <div class="side">
-<div class="nav on" onclick="tab('r')" data-t="r">📊 Resumen</div>
+<div class="nav on" onclick="tab('s')" data-t="s">💡 Sugerencias<span class="nb" id="nsc" style="display:none;margin-left:auto">0</span></div>
 <div class="nav" onclick="tab('t')" data-t="t">👷 Tecnicos</div>
 <div class="nav" onclick="tab('f')" data-t="f">⏰ Franjas</div>
-<div class="nav" onclick="tab('m')" data-t="m">🟢 Movibles</div>
-<div class="nav" onclick="tab('b')" data-t="b">🔒 Bloqueadas</div>
-<div class="nav" onclick="tab('a')" data-t="a">🔔 Alertas<span class="nb" id="nac" style="display:none">0</span></div>
-<div class="nav" onclick="tab('s')" data-t="s">💡 Sugerencias<span class="nb" id="nsc" style="display:none">0</span></div><div class="nav" data-t="r" onclick="tab('r')">📊 Reportes<span id="nrc" style="display:none;margin-left:auto;background:var(--g);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px">0</span></div>
+<div class="nav" onclick="tab('r')" data-t="r">📊 Resumen</div>
+<div class="nav" onclick="tab('a')" data-t="a">🔔 Alertas<span class="nb" id="nac" style="display:none;margin-left:auto">0</span></div>
+<div class="nav" onclick="tab('rep')" data-t="rep">📈 Reportes<span id="nrc" style="display:none;margin-left:auto;background:var(--g);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:600">0</span></div>
+<div style="padding:6px 14px 3px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--t2);margin-top:6px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none';this.textContent=this.textContent.includes('▶')?'▼ Más vistas':'▶ Más vistas'">▶ Más vistas</div>
+<div style="display:none">
+  <div class="nav" onclick="tab('m')" data-t="m">🟢 Movibles</div>
+  <div class="nav" onclick="tab('b')" data-t="b">🔒 Bloqueadas</div>
+</div><div class="nav" data-t="r" onclick="tab('r')">📊 Reportes<span id="nrc" style="display:none;margin-left:auto;background:var(--g);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px">0</span></div>
 </div>
 <div class="ct">
 <div id="banner" class="banner"></div>
@@ -62,7 +68,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 <div class="pane" id="pane-b"><div class="frow"><select id="fbt" onchange="rB()"><option value="">Todos tecnicos</option></select></div><div class="sec">Bloqueadas<span class="cnt" id="bc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Motivo</th></tr></thead><tbody id="blb"></tbody></table></div></div>
 <div class="pane" id="pane-a"><div class="frow"><select id="fas" onchange="rA()"><option value="">Toda severidad</option><option value="critica">🔴 Critica</option><option value="alta">🟠 Alta</option><option value="media">🟡 Media</option></select></div><div class="sec">Alertas<span class="cnt" id="ac">0</span></div><div id="al"></div></div>
 <div class="pane" id="pane-s"><div class="frow"><select id="fse" onchange="rS()"><option value="pendiente">Pendientes</option><option value="aplicada">Aplicadas</option><option value="descartada">Descartadas</option><option value="todas">Todas</option></select><select id="fsr" onchange="rS()"><option value="">Todo riesgo</option><option value="bajo">🟢 Bajo</option><option value="alto">🔴 Alto</option></select><span class="sp" style="font-size:12px;color:var(--t2)">El coordinador decide. Solo en sesion.</span></div><div class="sec">Sugerencias<span class="cnt" id="sc2">0</span></div><div id="sl"></div></div>
-</div></div><div class="pane" id="pane-r"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button onclick="tomarCorte()" id="btn-corte" style="background:var(--bl);color:#fff;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none">📸 Tomar corte ahora</button><button onclick="exportarReporte()" id="btn-exp" style="background:transparent;border:1px solid var(--b);color:var(--t2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer">📥 Descargar Excel</button><span style="font-size:12px;color:var(--t2)">Cada subida del Excel registra un corte automáticamente</span><select id="rep-fecha" onchange="cargarReporte()" style="margin-left:auto;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:5px 10px;font-size:13px"><option value="">Hoy</option></select></div><div id="rep-content"><div style="padding:40px;text-align:center"><div style="font-size:36px;opacity:.4">📊</div><div>Sin cortes registrados hoy</div><div style="font-size:12px;margin-top:6px;color:var(--t2)">Cada vez que subes el Excel se registra un corte</div></div></div></div><script>
+</div></div><div class="pane" id="pane-rep"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button onclick="tomarCorte()" id="btn-corte" style="background:var(--bl);color:#fff;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none">📸 Tomar corte ahora</button><button onclick="exportarReporte()" id="btn-exp" style="background:transparent;border:1px solid var(--b);color:var(--t2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer">📥 Descargar Excel</button><span style="font-size:12px;color:var(--t2)">Cada subida del Excel registra un corte automáticamente</span><select id="rep-fecha" onchange="cargarReporte()" style="margin-left:auto;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:5px 10px;font-size:13px"><option value="">Hoy</option></select></div><div id="rep-content"><div style="padding:40px;text-align:center"><div style="font-size:36px;opacity:.4">📊</div><div>Sin cortes registrados hoy</div><div style="font-size:12px;margin-top:6px;color:var(--t2)">Cada vez que subes el Excel se registra un corte</div></div></div></div><script>
 let D=null,SS={applied:{},dismissed:{}};
 const SIC={"movible":"bm","bloqueado":"bb","avanzado":"ba","finalizado":"bb"};
 const SICO={"por programar":"⬜","programado":"⬜","programada":"⬜","en camino":"🚗","en sitio":"🏠","mac enviada":"📤","mac principal enviada":"📤","dispositivos subidos":"📱","dispositivos cargados":"📱","por auditar":"🔍","finalizado":"✅","finalizada":"✅"};
@@ -71,16 +77,21 @@ function e(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;
 function sb(s,c){return '<span class="bs '+(SIC[c]||'bb')+'">'+(SICO[String(s).toLowerCase()]||'•')+' '+e(s)+'</span>'}
 function tmr(){const d=new Date();d.setDate(d.getDate()+1);return d.toISOString().split('T')[0]}
 function getFecha(){return document.getElementById('sel-fecha')?.value||tmr()}
-function tab(n){document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));document.querySelectorAll('.nav').forEach(v=>v.classList.remove('on'));document.getElementById('pane-'+n).classList.add('on');document.querySelector('[data-t="'+n+'"]').classList.add('on');if(n==='s')rS();if(n==='a')rA();if(n==='r')cargarReporte()}
-let _tt;function toast(m,t='ok'){let el=document.getElementById('_t');if(!el){el=document.createElement('div');el.id='_t';el.style.cssText='position:fixed;bottom:16px;right:16px;background:var(--s2);border:1px solid;border-radius:7px;padding:9px 14px;font-size:13px;z-index:9999;max-width:300px';document.body.appendChild(el)}el.textContent=m;el.style.borderColor=t==='ok'?'var(--g)':'var(--r)';el.style.color=t==='ok'?'var(--g)':'var(--r)';el.style.display='block';clearTimeout(_tt);_tt=setTimeout(()=>el.style.display='none',3500)}
-async function api(url,opts={}){const r=await fetch(url,opts);if(!r.ok){const x=await r.json().catch(()=>({message:r.statusText}));throw new Error(x.message||r.statusText)}return r.json()}
-async function load(){
-  try{const r=await api('/api/nivelacion');D=r;renderAll();document.getElementById('lu').textContent='Actualizado: '+(D.generado_en||'—').slice(11,16);toast('Datos cargados ✓')}
-  catch(err){toast('Error: '+err.message+' | Usa 📂 Excel para cargar datos','err');document.getElementById('cr').innerHTML='<div style="color:var(--r);padding:16px">⚠ '+e(err.message)+'<br><small>Sube el Excel con el boton 📂 de arriba</small></div>'}
+function tab(n){
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.nav').forEach(v=>v.classList.remove('on'));
+  var pi=document.getElementById('pane-'+n);
+  var ni=document.querySelector('[data-t="'+n+'"]');
+  if(pi)pi.classList.add('on');
+  if(ni)ni.classList.add('on');
+  if(n==='s')rS();
+  if(n==='a')rA();
+  if(n==='rep')cargarReporte();
 }
 async function refresh(){const b=document.getElementById('rb');b.disabled=true;b.textContent='↻...';try{await api('/api/refresh',{method:'POST',headers:{'Content-Type':'application/json'}});await load()}catch(err){toast('Error: '+err.message,'err')}finally{b.disabled=false;b.innerHTML='↻ Actualizar'}}
 async function upload(inp){const fi=inp.files[0];if(!fi)return;const fd=new FormData();fd.append('file',fi);try{toast('Procesando Excel...');const r=await api('/api/upload',{method:'POST',body:fd});toast('Excel: '+r.total_ordenes+' ordenes - cargando...');await load()}catch(err){toast('Error: '+err.message,'err')}inp.value=''}
 function renderAll(){if(!D)return;rResumen();rT();rF();rM();rB();rA();rS();fillFilters();badges()}
+  fillGF();
 function badges(){if(!D)return;const al=(D.alertas||[]).filter(a=>['critica','alta'].includes(a.severidad)).length;const na=document.getElementById('nac');al>0?(na.textContent=al,na.style.display=''):(na.style.display='none');const sl=(D.sugerencias||[]).length;const ns=document.getElementById('nsc');sl>0?(ns.textContent=sl,ns.style.display=''):(ns.style.display='none')}
 function rResumen(){const r=D.resumen||{};document.getElementById('cr').innerHTML='<div class="card b"><div class="cl">Total</div><div class="cv">'+r.total_ordenes+'</div><div class="cs">Ordenes</div></div><div class="card g"><div class="cl">Movibles</div><div class="cv">'+r.movibles+'</div><div class="cs">Para nivelar</div></div><div class="card"><div class="cl">Bloqueadas</div><div class="cv" style="color:var(--t2)">'+r.bloqueadas+'</div><div class="cs">No mover</div></div><div class="card '+(r.alertas_criticas>0?'r':r.alertas>0?'y':'g')+'"><div class="cl">Alertas</div><div class="cv">'+r.alertas+'</div><div class="cs">'+r.alertas_criticas+' criticas</div></div><div class="card p"><div class="cl">Sugerencias</div><div class="cv" style="color:var(--p)">'+r.sugerencias+'</div><div class="cs">Coordinador decide</div></div><div class="card '+(r.tecnicos_sobrecargados>0?'r':'')+'"><div class="cl">Tecnicos</div><div class="cv">'+r.tecnicos_total+'</div><div class="cs">'+r.tecnicos_sobrecargados+' sobrecargados</div></div><div class="card y"><div class="cl">Sin tecnico</div><div class="cv" style="color:var(--y)">'+(r.sin_tecnico||0)+'</div><div class="cs">Sin asignar</div></div><div class="card y"><div class="cl">Objetivo</div><div class="cv" style="color:var(--g);font-size:18px">'+(r.objetivo_por_tecnico||'4-6')+'</div><div class="cs">por tecnico</div></div>';let fh='<div class="sec">Balance por franja</div><div class="fc-grid">';(D.carga_por_franja||[]).filter(f=>f.franja!=='Sin Franja').forEach(f=>{const p=f.total>0?Math.round(f.movibles/f.total*100):0;const c=f.sobrecarga?'fr':p>50?'fg':'fy';fh+='<div class="fc"><div class="fcn">⏰ '+e(f.franja)+'</div><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-bottom:2px"><span>Mov:'+f.movibles+'</span><span>'+p+'%</span></div><div class="pb"><div class="pf '+c+'" style="width:'+p+'%"></div></div><div style="font-size:11px;color:var(--t2)">'+f.total+' total · '+f.tecnicos+' tec'+(f.sobrecarga?' ⚠':'')+'</div></div>';});fh+='</div>';document.getElementById('rfr').innerHTML=fh}
 function rT(){if(!D)return;const q=(document.getElementById('ftn').value||'').toLowerCase();const sf=document.getElementById('fts').value;let ts=D.carga_por_tecnico||[];if(q)ts=ts.filter(t=>t.tecnico.toLowerCase().includes(q));if(sf==='s')ts=ts.filter(t=>t.sobrecarga);if(sf==='c')ts=ts.filter(t=>!t.sobrecarga);let h='';ts.forEach(t=>{const p=Math.min(100,Math.round(t.total/6*100));const c=t.sobrecarga?'fr':p>60?'fy':'fg';const fp=Object.entries(t.franjas||{}).map(([f,n])=>'<span class="tag" style="'+(n>=2?'color:var(--y)':'')+'">'+e(f.slice(0,5))+'x'+n+'</span>').join('');h+='<div class="tg"><div class="tn">'+(t.sobrecarga?'<span class="od"></span>':'')+e(t.tecnico)+'</div><div style="font-size:11px;color:var(--t2);margin-bottom:6px">📍 '+e(t.zona)+'</div><div class="pb"><div class="pf '+c+'" style="width:'+p+'%"></div></div><div class="ts"><div class="tv"><span class="v">'+t.total+'</span><span class="l">Total</span></div><div class="tv"><span class="v" style="color:var(--g)">'+t.movibles+'</span><span class="l">Mov</span></div><div class="tv"><span class="v">'+t.activas+'</span><span class="l">Act</span></div><div class="tv"><span class="v" style="color:var(--t2)">'+t.finalizadas+'</span><span class="l">Fin</span></div></div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">'+fp+'</div></div>';});document.getElementById('tg').innerHTML=h||'<div class="nd"><div class="ic">👷</div><div>Sin tecnicos</div></div>'}
@@ -88,7 +99,10 @@ function rF(){if(!D)return;let h='';(D.carga_por_franja||[]).forEach(f=>{const p
 function rM(){if(!D)return;let os=D.ordenes_movibles||[];const t=document.getElementById('fmt').value;const f=document.getElementById('fmf').value;const q=(document.getElementById('fms').value||'').toLowerCase();if(t)os=os.filter(o=>o.tecnico===t);if(f)os=os.filter(o=>o.franja===f);if(q)os=os.filter(o=>String(o.id).toLowerCase().includes(q)||(o.tecnico||'').toLowerCase().includes(q)||(o.direccion||'').toLowerCase().includes(q));document.getElementById('mc').textContent=os.length;document.getElementById('mb').innerHTML=os.length?os.map(o=>'<tr><td><strong>'+e(o.id)+'</strong></td><td>'+e(o.tecnico)+'</td><td>'+sb(o.estado,o.estado_clase)+'</td><td><span class="tag">'+e(o.franja)+'</span></td><td><span class="tag">'+e(o.tipo)+'</span></td><td>'+e(o.zona)+'</td><td>'+e(o.subzona)+'</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+e(o.direccion||'—')+'</td></tr>').join(''):'<tr class="er"><td colspan="8">Sin ordenes movibles</td></tr>'}
 function rB(){if(!D)return;let os=D.ordenes_bloqueadas||[];const t=document.getElementById('fbt').value;if(t)os=os.filter(o=>o.tecnico===t);document.getElementById('bc').textContent=os.length;document.getElementById('blb').innerHTML=os.length?os.map(o=>'<tr><td><strong>'+e(o.id)+'</strong></td><td>'+e(o.tecnico)+'</td><td>'+sb(o.estado,o.estado_clase)+'</td><td><span class="tag">'+e(o.franja)+'</span></td><td><span class="tag">'+e(o.tipo)+'</span></td><td>'+e(o.zona)+'</td><td style="font-size:12px;color:var(--t2)">'+(o.estado_clase==='avanzado'?'Avanzada':o.estado_clase==='finalizado'?'Finalizada':'Bloqueada')+'</td></tr>').join(''):'<tr class="er"><td colspan="7">Sin bloqueadas</td></tr>'}
 function rA(){if(!D)return;let al=D.alertas||[];const sv=document.getElementById('fas').value;if(sv)al=al.filter(a=>a.severidad===sv);al.sort((a,b)=>({'critica':0,'alta':1,'media':2}[a.severidad]||9)-({'critica':0,'alta':1,'media':2}[b.severidad]||9));document.getElementById('ac').textContent=al.length;document.getElementById('al').innerHTML=al.length?al.map(a=>'<div class="al al-'+(a.severidad==='critica'?'c':a.severidad==='alta'?'a':'m')+'"><span>'+(AICO[a.tipo]||'⚠️')+'</span><div><div class="al-ti">'+e((a.tipo||'').replace(/_/g,' '))+'</div><div class="al-de">'+e(a.detalle)+'</div>'+(a.tecnico?'<div style="font-size:11px;color:var(--t2);margin-top:2px">👷 '+e(a.tecnico)+(a.franja?' '+e(a.franja):'')+'</div>':'')+'</div><span class="al-bv">'+(a.severidad||'media').toUpperCase()+'</span></div>').join(''):'<div class="nd"><div class="ic">🔔</div><div>Sin alertas</div></div>'}
-function rS(){if(!D)return;let sg=D.sugerencias||[];const ef=document.getElementById('fse').value;const rf=document.getElementById('fsr').value;sg=sg.map(s=>({...s,_st:SS.applied[s.orden]?'aplicada':SS.dismissed[s.orden]?'descartada':'pendiente'}));if(ef!=='todas')sg=sg.filter(s=>s._st===ef);if(rf)sg=sg.filter(s=>s.riesgo===rf);document.getElementById('sc2').textContent=sg.length;document.getElementById('sl').innerHTML=sg.length?sg.map(s=>'<div class="sc '+(s._st==='aplicada'?'ap':s._st==='descartada'?'ds':'')+'"><div class="sh"><span class="son">📋 '+e(s.orden)+'</span><span class="tag">'+e(s.tipo)+'</span><span class="tag">'+e(s.franja_actual)+'</span>'+(s.aviso_sobrecarga?'<span class="tag" style="color:var(--o)">⚠ '+e(s.total_receptor)+'→'+(s.total_receptor+1)+'</span>':'')+(s.interzona?'<span class="tag" style="color:var(--o)">🗺</span>':'')+(s._st==='aplicada'?'<span class="tag" style="color:var(--g)">✓</span>':s._st==='descartada'?'<span class="tag">—</span>':'')+'<span style="margin-left:auto;font-size:12px;color:var(--t2)">Score:<strong style="color:var(--bl)">'+s.score+'</strong></span></div><div class="sar"><span class="tch">'+e(s.tecnico_actual||'SIN')+'</span><span style="color:var(--t2)">→</span><span class="tch rc">'+e(s.tecnico_sugerido)+'</span>'+(s.dist_receptor_km!=null?'<span style="font-size:11px;color:var(--t2)">📍'+s.dist_receptor_km+'km</span>':'')+'</div><div style="font-size:12px;color:var(--t2);margin-bottom:5px">Riesgo: <span style="color:'+(s.riesgo==='alto'?'var(--r)':'var(--g)')+'">'+s.riesgo+'</span> · '+e(s.beneficio)+'</div><div class="sm">💬 '+e(s.motivo)+'</div><div class="sac">'+(s._st!=='aplicada'?'<button class="btn bg" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="aplicar" onclick="window.sAct(this.dataset.o,this.dataset.a)">✓ Aplicar</button>':'')+(s._st!=='descartada'?'<button class="btn br" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="descartar" onclick="window.sAct(this.dataset.o,this.dataset.a)">✕</button>':'')+(s._st!=='pendiente'?'<button class="btn bgh" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="revertir" onclick="window.sAct(this.dataset.o,this.dataset.a)">↩</button>':'')+'</div></div>').join(''):'<div class="nd"><div class="ic">💡</div><div>Sin sugerencias</div></div>'}
+function rS(){if(!D)return;let sg=D.sugerencias||[];const ef=document.getElementById('fse').value;const rf=document.getElementById('fsr').value;sg=sg.map(s=>({...s,_st:SS.applied[s.orden]?'aplicada':SS.dismissed[s.orden]?'descartada':'pendiente'}));if(_gZ)sg=sg.filter(s=>s.zona===_gZ);
+  if(_gSZ)sg=sg.filter(s=>s.subzona===_gSZ);
+  if(_bl.length)sg=sg.filter(s=>!_bl.includes(s.tecnico_actual)&&!_bl.includes(s.tecnico_sugerido));
+  if(ef!=='todas')sg=sg.filter(s=>s._st===ef);if(rf)sg=sg.filter(s=>s.riesgo===rf);document.getElementById('sc2').textContent=sg.length;document.getElementById('sl').innerHTML=sg.length?sg.map(s=>'<div class="sc '+(s._st==='aplicada'?'ap':s._st==='descartada'?'ds':'')+'"><div class="sh"><span class="son">📋 '+e(s.orden)+'</span><span class="tag">'+e(s.tipo)+'</span><span class="tag">'+e(s.franja_actual)+'</span>'+(s.aviso_sobrecarga?'<span class="tag" style="color:var(--o)">⚠ '+e(s.total_receptor)+'→'+(s.total_receptor+1)+'</span>':'')+(s.interzona?'<span class="tag" style="color:var(--o)">🗺</span>':'')+(s._st==='aplicada'?'<span class="tag" style="color:var(--g)">✓</span>':s._st==='descartada'?'<span class="tag">—</span>':'')+'<span style="margin-left:auto;font-size:12px;color:var(--t2)">Score:<strong style="color:var(--bl)">'+s.score+'</strong></span></div><div class="sar"><span class="tch">'+e(s.tecnico_actual||'SIN')+'</span><span style="color:var(--t2)">→</span><span class="tch rc">'+e(s.tecnico_sugerido)+'</span>'+(s.dist_receptor_km!=null?'<span style="font-size:11px;color:var(--t2)">📍'+s.dist_receptor_km+'km</span>':'')+'</div><div style="font-size:12px;color:var(--t2);margin-bottom:5px">Riesgo: <span style="color:'+(s.riesgo==='alto'?'var(--r)':'var(--g)')+'">'+s.riesgo+'</span> · '+e(s.beneficio)+'</div><div class="sm">💬 '+e(s.motivo)+'</div><div class="sac">'+(s._st!=='aplicada'?'<button class="btn bg" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="aplicar" onclick="window.sAct(this.dataset.o,this.dataset.a)">✓ Aplicar</button>':'')+(s._st!=='descartada'?'<button class="btn br" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="descartar" onclick="window.sAct(this.dataset.o,this.dataset.a)">✕</button>':'')+(s._st!=='pendiente'?'<button class="btn bgh" style="font-size:12px;padding:3px 10px" data-o="'+e(s.orden)+'" data-a="revertir" onclick="window.sAct(this.dataset.o,this.dataset.a)">↩</button>':'')+'</div></div>').join(''):'<div class="nd"><div class="ic">💡</div><div>Sin sugerencias</div></div>'}
 async function sAct(orden,accion){try{await api('/api/sugerencias/accion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orden,accion})});if(accion==='aplicar'){SS.applied[orden]=true;delete SS.dismissed[orden]}else if(accion==='descartar'){SS.dismissed[orden]=true;delete SS.applied[orden]}else{delete SS.applied[orden];delete SS.dismissed[orden]}rS();toast({'aplicar':'✓ Aplicada','descartar':'— Descartada','revertir':'↩ Revertida'}[accion]||'OK')}catch(err){toast('Error: '+err.message,'err')}}
 function fillFilters(){if(!D)return;const ts=[...new Set((D.carga_por_tecnico||[]).map(t=>t.tecnico))].sort();const fs=[...new Set((D.carga_por_franja||[]).map(f=>f.franja))];function fill(id,vals,lbl){const el=document.getElementById(id);if(!el)return;const prev=el.value;el.innerHTML='<option value="">'+lbl+'</option>'+vals.map(v=>'<option value="'+e(v)+'"'+(v===prev?' selected':'')+'>'+e(v)+'</option>').join('');el.value=prev}fill('fmt',ts,'Todos tecnicos');fill('fmf',fs,'Todas franjas');fill('fbt',ts,'Todos tecnicos')}
 
@@ -125,5 +139,52 @@ async function cargarReporte(){var fecha=document.getElementById('rep-fecha')?.v
 async function tomarCorte(){var btn=document.getElementById('btn-corte');if(btn){btn.disabled=true;btn.textContent='⏳ Tomando...';}try{var r=await fetch('/api/reports/snapshot',{method:'POST'});if(!r.ok){var x=await r.json().catch(()=>({message:'Error'}));throw new Error(x.message);}var data=await r.json();toast(data.mensaje||'Corte registrado ✓');await cargarReporte();}catch(err){toast('Error: '+err.message,'err');}finally{if(btn){btn.disabled=false;btn.textContent='📸 Tomar corte ahora';}}}
 async function exportarReporte(){var fecha=document.getElementById('rep-fecha')?.value||'';window.open('/api/reports/export'+(fecha?'?fecha='+fecha:''),'_blank');toast('📥 Descargando Excel...');}
 
-document.addEventListener('DOMContentLoaded',()=>{load();cargarReporte();setInterval(()=>{if(!document.hidden)load()},5*60*1000)});
+
+// === FILTRO GLOBAL ZONA/SUBZONA ===
+var _gZ='',_gSZ='';
+function applyGF(){
+  _gZ=document.getElementById('g-zona')?.value||'';
+  _gSZ=document.getElementById('g-subzona')?.value||'';
+  if(window.D){rT();rS();rF();rM();rB();}
+}
+function fillGF(){
+  var D=window.D||window._NP?.D;if(!D)return;
+  var all=[...(D.ordenes_movibles||[]),...(D.ordenes_bloqueadas||[])];
+  var zs=[...new Set(all.map(o=>o.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
+  var ss=[...new Set(all.map(o=>o.subzona).filter(s=>s&&s!=='SIN_SUBZONA'))].sort();
+  function fill(id,vals,first){
+    var el=document.getElementById(id);if(!el)return;
+    var prev=el.value;
+    el.innerHTML='<option value="">'+first+'</option>'+vals.map(v=>'<option value="'+e(v)+'"'+(v===prev?' selected':'')+'>'+e(v)+'</option>').join('');
+    el.value=prev;
+  }
+  fill('g-zona',zs,'Todas las zonas');
+  fill('g-subzona',ss,'Todas las subzonas');
+}
+
+// === BLACKLIST BACKEND ===
+var _bl=[];
+async function loadBL(){
+  try{var r=await fetch('/api/blacklist');var d=await r.json();_bl=d.blacklist||[];updateBLbadge();}catch(e){}
+}
+async function addBL(t){
+  try{var r=await fetch('/api/blacklist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico:t})});
+  var d=await r.json();_bl=d.blacklist||[];updateBLbadge();rS();toast('🚫 '+e(t)+' en lista negra');}catch(err){toast('Error: '+err.message,'err');}
+}
+async function removeBL(t){
+  try{var r=await fetch('/api/blacklist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico:t})});
+  var d=await r.json();_bl=d.blacklist||[];updateBLbadge();rS();toast('✅ '+e(t)+' removido de lista negra');}catch(err){toast('Error: '+err.message,'err');}
+}
+function updateBLbadge(){
+  var bd=document.getElementById('bl-badge');
+  if(bd){if(_bl.length>0){bd.textContent='🚫 '+_bl.length+' excluidos';bd.style.display='';}else bd.style.display='none';}
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  load();
+  loadBL();
+  loadBL();
+  setInterval(()=>{if(!document.hidden)load()},5*60*1000);
+  setTimeout(cargarReporte,3000);
+});
 </script></body></html>

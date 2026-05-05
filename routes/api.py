@@ -17,7 +17,13 @@ def get_nivelacion():
         force=request.args.get("refresh","false").lower()=="true"
         fecha=request.args.get("fecha"); zona=request.args.get("zona"); cat=request.args.get("cat")
         if fecha or zona or cat: force=True
-        return jsonify({"status":"ok",**_get(force=force,fecha=fecha,zona=zona,cat=cat)})
+        r=_get(force=force,fecha=fecha,zona=zona,cat=cat)
+    try:
+        from routes.blacklist import filter_suggestions,get_blacklist
+        bl=get_blacklist()
+        if bl and r.get("sugerencias"):r=dict(r);r["sugerencias"]=filter_suggestions(r["sugerencias"]);r["blacklist_activa"]=bl
+    except:pass
+    return jsonify({"status":"ok",**r})
     except Exception as e:
         logger.exception("Error /api/nivelacion"); return jsonify({"status":"error","message":str(e)}),500
 @api_bp.get("/resumen")

@@ -97,7 +97,7 @@ var ef=document.getElementById('fse')?.value||'pendiente';
 var rf=document.getElementById('fsr')?.value||'';
 var zf=document.getElementById('fsz')?.value||'';
 var szf=document.getElementById('fssz')?.value||'';
-sg=sg.map(function(s){return Object.assign({},s,{_st:(_ap[s.orden]?'aplicada':_ds[s.orden]?'descartada':'pendiente')});});
+sg=sg.map(function(s){return Object.assign({},s,{_st:(SS.applied[s.orden]?'aplicada':SS.dismissed[s.orden]?'descartada':'pendiente')});});
 if(ef!=='todas')sg=sg.filter(function(s){return s._st===ef;});
 if(rf)sg=sg.filter(function(s){return s.riesgo===rf;});
 if(zf)sg=sg.filter(function(s){return s.zona===zf;});

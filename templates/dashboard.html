@@ -68,7 +68,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 <div class="pane" id="pane-m"><div class="frow"><select id="fmt" onchange="rM()"><option value="">Todos tecnicos</option></select><select id="fmf" onchange="rM()"><option value="">Todas franjas</option></select><input type="text" id="fms" placeholder="Buscar..." oninput="rM()" style="width:150px"></div><div class="sec">Movibles<span class="cnt" id="mc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Subzona</th><th>Direccion</th></tr></thead><tbody id="mb"></tbody></table></div></div>
 <div class="pane" id="pane-b"><div class="frow"><select id="fbt" onchange="rB()"><option value="">Todos tecnicos</option></select></div><div class="sec">Bloqueadas<span class="cnt" id="bc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Motivo</th></tr></thead><tbody id="blb"></tbody></table></div></div>
 <div class="pane" id="pane-a"><div class="frow"><select id="fas" onchange="rA()"><option value="">Toda severidad</option><option value="critica">🔴 Critica</option><option value="alta">🟠 Alta</option><option value="media">🟡 Media</option></select></div><div class="sec">Alertas<span class="cnt" id="ac">0</span></div><div id="al"></div></div>
-<div class="pane on" id="pane-s"><div class="frow"><select id="fse" onchange="rS()"><option value="pendiente">Pendientes</option><option value="aplicada">Aplicadas</option><option value="descartada">Descartadas</option><option value="todas">Todas</option></select><select id="fsr" onchange="rS()"><option value="">Todo riesgo</option><option value="bajo">🟢 Bajo</option><option value="alto">🔴 Alto</option></select><span class="sp" style="font-size:12px;color:var(--t2)">El coordinador decide. Solo en sesion.</span></div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 2px;border-top:1px solid var(--b);margin-top:4px"><span style="font-size:12px;color:var(--t2);white-space:nowrap">🚫 Lista negra:</span><input type="text" id="bl-inp" list="bl-techs" placeholder="Nombre técnico a excluir..." style="flex:1;min-width:160px;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px"><datalist id="bl-techs"></datalist><button onclick="addBLI()" style="background:var(--bl,#388bfd);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap">+ Excluir</button><span id="bl-tags" style="display:flex;gap:4px;flex-wrap:wrap"></span></div><div class="sec">Sugerencias<span class="cnt" id="sc2">0</span></div><div id="sl"></div></div>
+<div class="pane on" id="pane-s"><div class="frow"><select id="fse" onchange="rS()"><option value="pendiente">Pendientes</option><option value="aplicada">Aplicadas</option><option value="descartada">Descartadas</option><option value="todas">Todas</option></select><select id="fsr" onchange="rS()"><option value="">Todo riesgo</option><option value="bajo">🟢 Bajo</option><option value="alto">🔴 Alto</option></select><span class="sp" style="font-size:12px;color:var(--t2)">El coordinador decide. Solo en sesion.</span><select id="fsz" onchange="rS()" style="background:var(--s2);border:1px solid var(--b);border-radius:4px;color:var(--t);padding:4px 8px;font-size:13px"><option value="">Todas las zonas</option></select><select id="fssz" onchange="rS()" style="background:var(--s2);border:1px solid var(--b);border-radius:4px;color:var(--t);padding:4px 8px;font-size:13px"><option value="">Todas las subzonas</option></select></div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 2px;border-top:1px solid var(--b);margin-top:4px"><span style="font-size:12px;color:var(--t2);white-space:nowrap">🚫 Lista negra:</span><input type="text" id="bl-inp" list="bl-techs" placeholder="Nombre técnico a excluir..." style="flex:1;min-width:160px;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px"><datalist id="bl-techs"></datalist><button onclick="addBLI()" style="background:var(--bl,#388bfd);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap">+ Excluir</button><span id="bl-tags" style="display:flex;gap:4px;flex-wrap:wrap"></span></div><div class="sec">Sugerencias<span class="cnt" id="sc2">0</span></div><div id="sl"></div></div>
 </div></div><div class="pane" id="pane-rep"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button onclick="tomarCorte()" id="btn-corte" style="background:var(--bl);color:#fff;padding:6px 14px;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;border:none">📸 Tomar corte ahora</button><button onclick="exportarReporte()" id="btn-exp" style="background:transparent;border:1px solid var(--b);color:var(--t2);padding:6px 14px;border-radius:7px;font-size:13px;cursor:pointer">📥 Descargar Excel</button><span style="font-size:12px;color:var(--t2)">Cada subida del Excel registra un corte automáticamente</span><select id="rep-fecha" onchange="cargarReporte()" style="margin-left:auto;background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:5px 10px;font-size:13px"><option value="">Hoy</option></select></div><div id="rep-content"><div style="padding:40px;text-align:center"><div style="font-size:36px;opacity:.4">📊</div><div>Sin cortes registrados hoy</div><div style="font-size:12px;margin-top:6px;color:var(--t2)">Cada vez que subes el Excel se registra un corte</div></div></div></div><script>
 var D=null,SS={applied:{},dismissed:{}},_gZ='',_gSZ='',_bl=[];
 var SIC={"movible":"bm","bloqueado":"bb","avanzado":"ba","finalizado":"bb"};
@@ -90,8 +90,84 @@ function rF(){if(!D)return;var h='';(D.carga_por_franja||[]).forEach(function(f)
 function rM(){if(!D)return;var os=D.ordenes_movibles||[];var t=document.getElementById('fmt')?.value||'';var f=document.getElementById('fmf')?.value||'';var q=(document.getElementById('fms')?.value||'').toLowerCase();if(t)os=os.filter(function(o){return o.tecnico===t;});if(f)os=os.filter(function(o){return o.franja===f;});if(_gZ)os=os.filter(function(o){return o.zona===_gZ;});if(_gSZ)os=os.filter(function(o){return o.subzona===_gSZ;});if(q)os=os.filter(function(o){return String(o.id).toLowerCase().includes(q)||(o.tecnico||'').toLowerCase().includes(q)||(o.direccion||'').toLowerCase().includes(q);});var mc=document.getElementById('mc');if(mc)mc.textContent=os.length;var mb=document.getElementById('mb');if(mb)mb.innerHTML=os.length?os.map(function(o){return '<tr><td><strong>'+e(o.id)+'</strong></td><td>'+e(o.tecnico)+'</td><td>'+sb(o.estado,o.estado_clase)+'</td><td><span class="tag">'+e(o.franja)+'</span></td><td><span class="tag">'+e(o.tipo)+'</span></td><td>'+e(o.zona)+'</td><td>'+e(o.subzona)+'</td><td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+e(o.direccion||'—')+'</td></tr>';}).join(''):'<tr class="er"><td colspan="8">Sin movibles</td></tr>';}
 function rB(){if(!D)return;var os=D.ordenes_bloqueadas||[];var t=document.getElementById('fbt')?.value||'';if(t)os=os.filter(function(o){return o.tecnico===t;});if(_gZ)os=os.filter(function(o){return o.zona===_gZ;});var bc=document.getElementById('bc');if(bc)bc.textContent=os.length;var blb=document.getElementById('blb');if(blb)blb.innerHTML=os.length?os.map(function(o){var mot=o.estado_clase==='avanzado'?'Avanzada':o.estado_clase==='finalizado'?'Finalizada':'Bloqueada';return '<tr><td><strong>'+e(o.id)+'</strong></td><td>'+e(o.tecnico)+'</td><td>'+sb(o.estado,o.estado_clase)+'</td><td><span class="tag">'+e(o.franja)+'</span></td><td><span class="tag">'+e(o.tipo)+'</span></td><td>'+e(o.zona)+'</td><td style="font-size:12px;color:var(--t2)">'+mot+'</td></tr>';}).join(''):'<tr class="er"><td colspan="7">Sin bloqueadas</td></tr>';}
 function rA(){if(!D)return;var al=D.alertas||[];var sv=document.getElementById('fas')?.value||'';if(sv)al=al.filter(function(a){return a.severidad===sv;});al.sort(function(a,b){var ord={'critica':0,'alta':1,'media':2};return (ord[a.severidad]||9)-(ord[b.severidad]||9);});var ac=document.getElementById('ac');if(ac)ac.textContent=al.length;var alEl=document.getElementById('al');if(alEl)alEl.innerHTML=al.length?al.map(function(a){var sev=a.severidad||'media';var cls=sev==='critica'?'c':sev==='alta'?'a':'m';return '<div class="al al-'+cls+'"><span>'+(AICO[a.tipo]||'⚠️')+'</span><div><div class="al-ti">'+e((a.tipo||'').replace(/_/g,' '))+'</div><div class="al-de">'+e(a.detalle)+'</div>'+(a.tecnico?'<div style="font-size:11px;color:var(--t2)">👷 '+e(a.tecnico)+(a.franja?' '+e(a.franja):'')+'</div>':'')+'</div><span class="al-bv">'+sev.toUpperCase()+'</span></div>';}).join(''):'<div class="nd"><div class="ic">🔔</div><div>Sin alertas</div></div>';}
-function rS(){if(!D)return;var sg=D.sugerencias||[];var ef=document.getElementById('fse')?.value||'pendiente';var rf=document.getElementById('fsr')?.value||'';if(_gZ)sg=sg.filter(function(s){return s.zona===_gZ;});if(_gSZ)sg=sg.filter(function(s){return s.subzona===_gSZ;});var bl=[].concat(_bl,D.blacklist_activa||[]);var blSet=new Set(bl);if(blSet.size)sg=sg.filter(function(s){return !blSet.has(s.tecnico_actual)&&!blSet.has(s.tecnico_sugerido);});sg=sg.map(function(s){return Object.assign({},s,{_st:SS.applied[s.orden]?'aplicada':SS.dismissed[s.orden]?'descartada':'pendiente'});});if(ef!=='todas')sg=sg.filter(function(s){return s._st===ef;});if(rf)sg=sg.filter(function(s){return s.riesgo===rf;});var sc2=document.getElementById('sc2');if(sc2)sc2.textContent=sg.length;var sl=document.getElementById('sl');if(!sl)return;if(!sg.length){sl.innerHTML='<div class="nd"><div class="ic">💡</div><div>Sin sugerencias '+ef+'</div></div>';return;}sl.innerHTML=sg.map(function(s){var ord=e(s.orden);var isApp=s._st==='aplicada',isDis=s._st==='descartada';return '<div class="sc '+(isApp?'ap':isDis?'ds':'')+'" id="sg-'+ord+'"><div class="sh"><span class="son">📋 '+ord+'</span><span class="tag">'+e(s.tipo)+'</span><span class="tag">'+e(s.franja_actual)+'</span>'+(s.aviso_sobrecarga?'<span class="tag" style="color:var(--o)">⚠ '+s.total_receptor+'→'+(s.total_receptor+1)+'</span>':'')+(s.interzona?'<span class="tag" style="color:var(--o)">🗺</span>':'')+(isApp?'<span class="tag" style="color:var(--g)">✓</span>':isDis?'<span class="tag">—</span>':'')+'<span style="margin-left:auto;font-size:12px;color:var(--t2)">Score:<strong>'+s.score+'</strong></span></div><div class="sar"><span class="tch">'+e(s.tecnico_actual||'SIN')+'</span><span style="color:var(--t2)">→</span><span class="tch rc">'+e(s.tecnico_sugerido)+'</span>'+(s.dist_receptor_km!=null?'<span style="font-size:11px;color:var(--t2)">📍'+s.dist_receptor_km+'km</span>':'')+'</div><div style="font-size:12px;color:var(--t2);margin-bottom:4px">Riesgo: <span style="color:'+(s.riesgo==='alto'?'var(--r)':'var(--g)')+'">'+s.riesgo+'</span> · '+e(s.beneficio)+'</div><div class="sm">💬 '+e(s.motivo)+'</div><div class="sac">'+(!isApp?'<button class="btn bg" style="font-size:12px;padding:3px 10px" data-ord="'+ord+'" data-act="aplicar" onclick="sAct(this.dataset.ord,this.dataset.act)">✓ Aplicar</button>':'')+(!isDis?'<button class="btn br" style="font-size:12px;padding:3px 10px" data-ord="'+ord+'" data-act="descartar" onclick="sAct(this.dataset.ord,this.dataset.act)">✕</button>':'')+((isApp||isDis)?'<button class="btn bgh" style="font-size:12px;padding:3px 10px" data-ord="'+ord+'" data-act="revertir" onclick="sAct(this.dataset.ord,this.dataset.act)">↩</button>':'')+'</div></div>';}).join('');}
-async function sAct(orden,accion){try{await fetch('/api/sugerencias/accion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orden:orden,accion:accion})});if(accion==='aplicar'){SS.applied[orden]=true;delete SS.dismissed[orden];}else if(accion==='descartar'){SS.dismissed[orden]=true;delete SS.applied[orden];}else{delete SS.applied[orden];delete SS.dismissed[orden];}rS();toast({'aplicar':'✓ Aplicada','descartar':'— Descartada','revertir':'↩ Revertida'}[accion]||'OK');}catch(err){toast('Error: '+err.message,'err');}}
+function rS(){
+if(!D)return;
+var sg=D.sugerencias||[];
+var ef=document.getElementById('fse')?.value||'pendiente';
+var rf=document.getElementById('fsr')?.value||'';
+var zf=document.getElementById('fsz')?.value||'';
+var szf=document.getElementById('fssz')?.value||'';
+sg=sg.map(function(s){return Object.assign({},s,{_st:(_ap[s.orden]?'aplicada':_ds[s.orden]?'descartada':'pendiente')});});
+if(ef!=='todas')sg=sg.filter(function(s){return s._st===ef;});
+if(rf)sg=sg.filter(function(s){return s.riesgo===rf;});
+if(zf)sg=sg.filter(function(s){return s.zona===zf;});
+if(szf)sg=sg.filter(function(s){return s.subzona===szf;});
+if(_bl.length)sg=sg.filter(function(s){return!_bl.includes(s.tecnico_actual)&&!_bl.includes(s.tecnico_sugerido);});
+var allSg=D.sugerencias||[];
+var zonas=[...new Set(allSg.map(function(s){return s.zona;}).filter(Boolean))].sort();
+var szBase=zf?allSg.filter(function(s){return s.zona===zf;}):allSg;
+var subzonas=[...new Set(szBase.map(function(s){return s.subzona;}).filter(Boolean))].sort();
+var fillSel=function(id,vals,lbl){var el=document.getElementById(id);if(!el)return;var cur=el.value;el.innerHTML='<option value="">'+lbl+'</option>'+vals.map(function(v){return'<option value="'+e(v)+'"'+(v===cur?' selected':'')+'>'+e(v)+'</option>';}).join('');};
+fillSel('fsz',zonas,'Todas las zonas');
+fillSel('fssz',subzonas,'Todas las subzonas');
+var cnt=document.getElementById('sc');if(cnt)cnt.textContent=sg.length;
+var nb=document.getElementById('nb');if(nb){if(sg.length>0){nb.textContent=sg.length;nb.style.display='';}else nb.style.display='none';}
+var container=document.getElementById('sl');if(!container)return;
+if(!sg.length){container.innerHTML='<div class="nd"><span class="ndi">💡</span><div>Sin sugerencias '+ef+'</div></div>';return;}
+var byZona={};
+sg.forEach(function(s){var z=s.zona||'Sin Zona';if(!byZona[z])byZona[z]=[];byZona[z].push(s);});
+var zonasSorted=Object.keys(byZona).sort();
+var html='';
+zonasSorted.forEach(function(zona){
+var grupo=byZona[zona];
+var nAlto=grupo.filter(function(s){return s.riesgo==='alto';}).length;
+var hColor=nAlto>0?'var(--r)':'var(--bl)';
+html+='<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:12px 0 4px;padding-bottom:6px;border-bottom:1px solid var(--b)">';
+html+='<span style="font-size:13px;font-weight:700;color:'+hColor+'">📍 '+e(zona)+'</span>';
+html+='<span style="font-size:11px;color:var(--t2)">'+grupo.length+' sugerencias</span>';
+if(nAlto)html+='<span style="font-size:11px;color:var(--r)">⚠ '+nAlto+' riesgo alto</span>';
+html+='</div>';
+grupo.forEach(function(s){
+var ord=e(s.orden);
+var isApp=s._st==='aplicada',isDis=s._st==='descartada';
+var rCol=s.riesgo==='alto'?'var(--r)':'var(--g)';
+var sCol=s.score>=5000?'var(--g)':s.score>=3000?'var(--y)':'var(--t2)';
+var km=s.dist_receptor_km!=null?'📏 '+s.dist_receptor_km+'km':'';
+html+='<div class="sc '+(isApp?'ap':isDis?'ds':'')+'" id="sg-'+ord+'">';
+html+='<div class="sh">';
+html+='<span class="son">📋 '+ord+'</span>';
+html+='<span class="tag">'+e(s.tipo)+'</span>';
+html+='<span class="tag">⏰ '+e(s.franja_actual)+'</span>';
+if(s.interzona)html+='<span class="tag" style="color:var(--o);border-color:var(--o)">🗺 Interzona</span>';
+if(isApp)html+='<span class="tag" style="color:var(--g)">✓ Aplicada</span>';
+if(isDis)html+='<span class="tag" style="color:var(--t2)">— Descartada</span>';
+html+='<span style="margin-left:auto;font-size:13px;font-weight:700;color:'+sCol+'">'+s.score+'</span>';
+html+='</div>';
+html+='<div style="font-size:11px;color:var(--t2);margin-bottom:5px;display:flex;gap:8px;flex-wrap:wrap">';
+html+='<span>📍 '+e(s.zona||'')+'</span>';
+if(s.subzona)html+='<span style="color:var(--t3)">⬦ '+e(s.subzona)+'</span>';
+if(km)html+='<span style="margin-left:auto;font-weight:600">'+km+'</span>';
+html+='</div>';
+html+='<div class="sa">';
+html+='<span class="tch">'+e(s.tecnico_actual||'SIN ASIGNAR')+'</span>';
+html+='<span style="color:var(--t2);padding:0 4px">→</span>';
+html+='<span class="tch" style="color:var(--g)">'+e(s.tecnico_sugerido)+'</span>';
+html+='</div>';
+html+='<div style="display:flex;gap:10px;font-size:12px;color:var(--t2);margin:5px 0;flex-wrap:wrap">';
+html+='<span>🎯 <span style="color:'+rCol+';font-weight:600">'+(s.riesgo==='alto'?'🔴 alto':'🟢 bajo')+'</span></span>';
+html+='<span>✨ '+e(s.beneficio)+'</span>';
+html+='</div>';
+html+='<div class="sm">💬 '+e(s.motivo)+'</div>';
+html+='<div class="sac">';
+if(!isApp)html+='<button class="btn g" onclick="sA(\''+ord+'\',\'aplicar\')">✓ Aplicar</button>';
+if(!isDis)html+='<button class="btn r" onclick="sA(\''+ord+'\',\'descartar\')">✕ Descartar</button>';
+if(isApp||isDis)html+='<button class="btn" onclick="sA(\''+ord+'\',\'revertir\')">↩ Revertir</button>';
+html+='</div>';
+html+='</div>';
+});
+});
+container.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px">'+html+'</div>';
+}
 function fillFilters(){if(!D)return;var ts=[...new Set((D.carga_por_tecnico||[]).map(function(t){return t.tecnico;}))].sort();var fs=[...new Set((D.carga_por_franja||[]).map(function(f){return f.franja;}))];function fill(id,vals,lbl){var el=document.getElementById(id);if(!el)return;var prev=el.value;el.innerHTML='<option value="">'+lbl+'</option>'+vals.map(function(v){return '<option value="'+e(v)+'"'+(v===prev?' selected':'')+'>'+e(v)+'</option>';}).join('');el.value=prev;}fill('fmt',ts,'Todos tecnicos');fill('fmf',fs,'Todas franjas');fill('fbt',ts,'Todos tecnicos');}
 function applyGF(){_gZ=document.getElementById('g-zona')?.value||'';_gSZ=document.getElementById('g-subzona')?.value||'';if(D){rT();rS();rF();rM();rB();}}
 function fillGF(){if(!D)return;var all=[].concat(D.ordenes_movibles||[],D.ordenes_bloqueadas||[]);var zs=[...new Set(all.map(function(o){return o.zona;}).filter(function(z){return z&&z!=='SIN_ZONA';}))].sort();var ss=[...new Set(all.map(function(o){return o.subzona;}).filter(function(s){return s&&s!=='SIN_SUBZONA';}))].sort();function fillG(id,vals,first){var el=document.getElementById(id);if(!el)return;var prev=el.value;el.innerHTML='<option value="">'+first+'</option>'+vals.map(function(v){return '<option value="'+e(v)+'"'+(v===prev?' selected':'')+'>'+e(v)+'</option>';}).join('');el.value=prev;}fillG('g-zona',zs,'Todas las zonas');fillG('g-subzona',ss,'Todas las subzonas');}

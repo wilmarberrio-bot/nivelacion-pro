@@ -41,9 +41,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 .bl-btn:hover{background:var(--r)}
 </style></head><body>
 <div class="top"><h1>⚡ Nivelacion Pro <span class="dot"></span></h1><span class="sp"></span>
-<span <select id="g-zona" onchange="applyGF()" title="Filtrar por zona" style="background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px;max-width:120px"><option value="">Todas las zonas</option></select>
-  <select id="g-subzona" onchange="applyGF()" title="Filtrar por subzona" style="background:var(--s2);border:1px solid var(--b);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px;max-width:130px"><option value="">Todas las subzonas</option></select>
-  id="lu" style="font-size:12px;color:var(--t2)">—</span>
+<span id="lu" style="font-size:12px;color:var(--t2)">—</span>
 <button class="btn bp" onclick="refresh()" id="rb">↻ Actualizar</button>
 <label class="btn bgh" for="xf">📂 Excel</label>
 <input type="file" id="xf" accept=".xlsx" style="display:none" onchange="upload(this)">
@@ -65,7 +63,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--b);font-size:13px;vertical-ali
 <div class="ct">
 <div id="banner" class="banner"></div>
 <div class="pane" id="pane-r"><div class="cards" id="cr"><div style="color:var(--t2);padding:16px">Cargando... (si tarda, sube un Excel con 📂)</div></div><div id="rfr"></div></div>
-<div class="pane" id="pane-t"><div class="frow"><input type="text" id="ftn" placeholder="Buscar tecnico..." oninput="rT()" style="width:170px"><select id="fts" onchange="rT()"><option value="">Todos</option><option value="s">Sobrecargados</option><option value="c">Con capacidad</option></select></div><div class="tc-grid" id="tg"></div></div>
+<div class="pane" id="pane-t"><div class="frow"><input type="text" id="ftn" placeholder="Buscar tecnico..." oninput="rT()" style="width:170px"><select id="fts" onchange="rT()"><option value="">Todos</option><option value="s">Sobrecargados</option><option value="c">Con capacidad</option></select><select id="g-zona" onchange="applyGF()" title="Zona" style="background:var(--s2);border:1px solid var(--b);border-radius:4px;color:var(--t);padding:4px 8px;font-size:13px"><option value="">Todas las zonas</option></select><select id="g-subzona" onchange="applyGF()" title="Subzona" style="background:var(--s2);border:1px solid var(--b);border-radius:4px;color:var(--t);padding:4px 8px;font-size:13px"><option value="">Todas las subzonas</option></select></div><div class="tc-grid" id="tg"></div></div>
 <div class="pane" id="pane-f"><div class="fc-grid" id="fg"></div></div>
 <div class="pane" id="pane-m"><div class="frow"><select id="fmt" onchange="rM()"><option value="">Todos tecnicos</option></select><select id="fmf" onchange="rM()"><option value="">Todas franjas</option></select><input type="text" id="fms" placeholder="Buscar..." oninput="rM()" style="width:150px"></div><div class="sec">Movibles<span class="cnt" id="mc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Subzona</th><th>Direccion</th></tr></thead><tbody id="mb"></tbody></table></div></div>
 <div class="pane" id="pane-b"><div class="frow"><select id="fbt" onchange="rB()"><option value="">Todos tecnicos</option></select></div><div class="sec">Bloqueadas<span class="cnt" id="bc">0</span></div><div class="tw"><table><thead><tr><th>Orden</th><th>Tecnico</th><th>Estado</th><th>Franja</th><th>Tipo</th><th>Zona</th><th>Motivo</th></tr></thead><tbody id="blb"></tbody></table></div></div>

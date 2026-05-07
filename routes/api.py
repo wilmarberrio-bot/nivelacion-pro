@@ -92,22 +92,22 @@ def get_sugerencias():
 @api_bp.post("/sugerencias/accion")
 def post_sugerencia_accion():
     body = request.get_json(silent=True) or {}
-    orden = body.get("orden")
+    orden = str(body.get("orden") or "").strip()
     accion = body.get("accion")
     if not orden or accion not in ("aplicar","descartar","revertir"):
         return jsonify({"status":"error","message":"orden y accion requeridos"}),400
     result = _get_result()
-    sug = next((s for s in result.get("sugerencias",[]) if s["orden"]==orden),None)
+    sug = next((s for s in result.get("sugerencias",[]) if str(s.get("orden"))==orden),None)
     if not sug: return jsonify({"status":"error","message":f"No encontrada: {orden}"}),404
     if accion=="aplicar":
-        _session_state["dismissed"]=[s for s in _session_state["dismissed"] if s["orden"]!=orden]
-        if not any(s["orden"]==orden for s in _session_state["applied"]): _session_state["applied"].append(sug)
+        _session_state["dismissed"]=[s for s in _session_state["dismissed"] if str(s.get("orden"))!=orden]
+        if not any(str(s.get("orden"))==orden for s in _session_state["applied"]): _session_state["applied"].append(sug)
     elif accion=="descartar":
-        _session_state["applied"]=[s for s in _session_state["applied"] if s["orden"]!=orden]
-        if not any(s["orden"]==orden for s in _session_state["dismissed"]): _session_state["dismissed"].append(sug)
+        _session_state["applied"]=[s for s in _session_state["applied"] if str(s.get("orden"))!=orden]
+        if not any(str(s.get("orden"))==orden for s in _session_state["dismissed"]): _session_state["dismissed"].append(sug)
     else:
-        _session_state["applied"]=[s for s in _session_state["applied"] if s["orden"]!=orden]
-        _session_state["dismissed"]=[s for s in _session_state["dismissed"] if s["orden"]!=orden]
+        _session_state["applied"]=[s for s in _session_state["applied"] if str(s.get("orden"))!=orden]
+        _session_state["dismissed"]=[s for s in _session_state["dismissed"] if str(s.get("orden"))!=orden]
     return jsonify({"status":"ok","orden":orden,"accion":accion,
                     "aplicadas":len(_session_state["applied"]),"descartadas":len(_session_state["dismissed"])})
 

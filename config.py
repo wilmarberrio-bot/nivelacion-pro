@@ -51,7 +51,7 @@ MAX_DUPLICATED_SLOTS     = 1
 MIN_IMBALANCE_TO_MOVE    = 2     # Diferencia minima de totales para sugerir movimiento
 ORDER_DURATION_HOURS     = 1.0
 MAX_ORDER_DURATION_HOURS = 1.5
-MAX_ALLOWED_DISTANCE_KM  = 8.0
+MAX_ALLOWED_DISTANCE_KM  = float(os.environ.get("MAX_ALLOWED_DISTANCE_KM", "2.0"))
 MAX_SUBZONES_SOFT        = 3
 ONSITE_ALERT_MINUTES     = int(os.environ.get("ONSITE_ALERT_MINUTES", "90"))
 OVERLOAD_PER_SLOT        = 2
@@ -66,8 +66,15 @@ NEARBY_BUILDING_RADIUS_KM         = 0.25
 MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
 
 ZONE_ADJACENCY = {
-    "MEDELLIN":    ["BELLO","ENVIGADO","ITAGUI","SABANETA"],
+    # Las zonas no listadas solo se consideran compatibles consigo mismas.
+    # Si hay coordenadas, el motor tambien exige maximo MAX_ALLOWED_DISTANCE_KM.
+    "MEDELLIN":    ["BELLO","ENVIGADO","ITAGUI","SABANETA","EL POBLADO","POBLADO","CENTRO"],
     "BELLO":       ["MEDELLIN"],
+    "CENTRO":      ["MEDELLIN","BOSTON","LA CANDELARIA"],
+    "BOSTON":      ["CENTRO","MEDELLIN","LA CANDELARIA"],
+    "LA CANDELARIA":["CENTRO","MEDELLIN","BOSTON"],
+    "EL POBLADO":  ["MEDELLIN","ENVIGADO"],
+    "POBLADO":     ["MEDELLIN","ENVIGADO"],
     "ENVIGADO":    ["MEDELLIN","SABANETA","ITAGUI"],
     "ITAGUI":      ["MEDELLIN","ENVIGADO","SABANETA","LA ESTRELLA"],
     "SABANETA":    ["ENVIGADO","ITAGUI","LA ESTRELLA","CALDAS","MEDELLIN"],

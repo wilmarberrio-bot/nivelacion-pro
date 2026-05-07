@@ -49,6 +49,36 @@ def _dist(order,tech,to,tl):
     ref=_tech_ref(tech,to,tl)
     return haversine(order["lat"],order["lon"],ref[0],ref[1]) if ref!=(0.0,0.0) else None
 
+def _adjacent_zones(z1,z2):
+    """Valida si dos zonas son iguales o aledanas segun config.
+    La validacion es bidireccional para evitar fallos por listas incompletas.
+    """
+    z1=norm_zone(z1); z2=norm_zone(z2)
+    if not z1 or not z2 or z1 in ("SIN_ZONA","SIN_VALOR") or z2 in ("SIN_ZONA","SIN_VALOR"):
+        return False
+    if z1==z2: return True
+    return z2 in ZONE_ADJACENCY.get(z1,[]) or z1 in ZONE_ADJACENCY.get(z2,[])
+
+def _route_allowed(order,receiver,idx,dist_km=None):
+    """Regla dura de coherencia logistica para sugerencias.
+    - Nunca sugerir desplazamientos mayores a MAX_ALLOWED_DISTANCE_KM.
+    - Si cambia de zona, solo permitir zonas aledanas.
+    - Si no hay coordenadas y cambia de zona, rechazar para evitar saltos incoherentes.
+    """
+    receiver_zone=idx["tech_main_zone"].get(receiver,"SIN_ZONA")
+    order_zone=order.get("zona","SIN_ZONA")
+    same_zone=norm_zone(order_zone)==norm_zone(receiver_zone)
+    adjacent=_adjacent_zones(order_zone,receiver_zone)
+    if dist_km is not None and dist_km>MAX_ALLOWED_DISTANCE_KM:
+        return False, f"Distancia {dist_km:.2f}km supera maximo {MAX_ALLOWED_DISTANCE_KM:.1f}km"
+    if same_zone:
+        return True, "Misma zona"
+    if not adjacent:
+        return False, f"Zona no aledana: {order_zone} -> {receiver_zone}"
+    if dist_km is None:
+        return False, f"Cambio de zona sin coordenadas: {order_zone} -> {receiver_zone}"
+    return True, f"Zona aledana y distancia {dist_km:.2f}km"
+
 def _can_add(tech,franja,tf,to):
     cur=tf.get(tech,{}).get(franja,0)
     if cur>=MAX_ORDERS_PER_SLOT: return False
@@ -125,16 +155,22 @@ def _score(order,donor,receiver,idx):
     sob=(rt>=MAX_IDEAL_LOAD)
     gap=dt-rt
     if gap<MIN_IMBALANCE_TO_MOVE and donor not in ("SIN_ASIGNAR",None): return -9999.0
+    if not _can_add(receiver,order["franja"],tf,to): return -9999.0
+
+    dr=_dist(order,receiver,to,tl)
+    allowed,_reason=_route_allowed(order,receiver,idx,dr)
+    if not allowed:
+        return -9999.0
+
     score=gap*800
     if sob: score-=1500
     if rt<MIN_IDEAL_LOAD: score+=(MIN_IDEAL_LOAD-rt)*600
     if dt>MAX_IDEAL_LOAD: score+=(dt-MAX_IDEAL_LOAD)*500
-    if not _can_add(receiver,order["franja"],tf,to): return -9999.0
     score+=300
-    dr=_dist(order,receiver,to,tl)
+
     dd=_dist(order,donor,to,tl) if donor not in ("SIN_ASIGNAR",None) else None
-    if dr and dr>MAX_ALLOWED_DISTANCE_KM: score-=INTERZONE_DISTANCE_PENALTY
     if dr is None: score-=200
+    elif dr<=MAX_ALLOWED_DISTANCE_KM: score+=(MAX_ALLOWED_DISTANCE_KM-dr)*250
     if dd and dr: score+=(dd-dr)*150
     rs=len(idx["tech_subzones"].get(receiver,set()))
     if order["subzona"] not in idx["tech_subzones"].get(receiver,set()) and rs>=3: score-=FRAGMENTATION_PENALTY*0.3
@@ -159,11 +195,14 @@ def _suggestions(orders,idx):
         if best_r is None or best_s<0: continue
         dv=tt.get(donor,0); rv=tt.get(best_r,0)
         oz=order["zona"]; rz=tmz.get(best_r,"SIN_ZONA")
-        interz=(rz!=oz and oz not in ZONE_ADJACENCY.get(rz,[rz]))
+        dr=_dist(order,best_r,to,tl)
+        allowed,route_reason=_route_allowed(order,best_r,idx,dr)
+        if not allowed: continue
+        interz=(norm_zone(rz)!=norm_zone(oz))
         if interz:
-            best_risk="alto"; iz[best_r]=iz.get(best_r,0)+1
+            best_risk="bajo"; iz[best_r]=iz.get(best_r,0)+1
             if iz[best_r]>MAX_INTERZONE_ASSIGNMENTS_PER_TECH: continue
-        dr=_dist(order,best_r,to,tl); dd=_dist(order,donor,to,tl) if donor!="SIN_ASIGNAR" else None
+        dd=_dist(order,donor,to,tl) if donor!="SIN_ASIGNAR" else None
         sob=(rv>=MAX_IDEAL_LOAD)
         if donor=="SIN_ASIGNAR": motivo=f"Sin tecnico -> {best_r}({rv} ords)"
         elif dv>MAX_IDEAL_LOAD: motivo=f"Sobrecarga: {donor}({dv})->{best_r}({rv})"
@@ -174,13 +213,16 @@ def _suggestions(orders,idx):
         if dv>MAX_IDEAL_LOAD: ben.append(f"Descarga {donor}")
         if rv<MIN_IDEAL_LOAD: ben.append(f"Completa cuota {best_r}")
         if dd and dr and dd>dr: ben.append(f"Ahorro ~{dd-dr:.1f}km")
+        if interz: ben.append(route_reason)
         if not ben: ben.append("Mejora balance")
         sugs.append({"orden":order["id"],"tecnico_actual":donor,"tecnico_sugerido":best_r,
             "franja_actual":order["franja"],"franja_sugerida":order["franja"],
-            "tipo":order.get("tipo",""),"estado":order["estado"],"zona":oz,"motivo":motivo,
-            "riesgo":best_risk,"beneficio":" / ".join(ben),"score":round(best_s,1),
+            "tipo":order.get("tipo",""),"estado":order["estado"],
+            "zona":oz,"subzona":order.get("subzona",""),"zona_sugerida":rz,
+            "motivo":motivo,"riesgo":best_risk,"beneficio":" / ".join(ben),"score":round(best_s,1),
             "interzona":interz,"aviso_sobrecarga":sob,"total_receptor":rv,"total_donante":dv,
-            "dist_receptor_km":round(dr,2) if dr else None})
+            "dist_receptor_km":round(dr,2) if dr else None,"distancia_max_km":MAX_ALLOWED_DISTANCE_KM,
+            "validacion_ruta":route_reason})
     sugs.sort(key=lambda x:x["score"],reverse=True)
     return sugs[:50]
 

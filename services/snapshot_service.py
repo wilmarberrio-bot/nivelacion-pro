@@ -1,165 +1,329 @@
 """
 services/snapshot_service.py
-Registro evolutivo de órdenes por día.
-Cada vez que se sube el Excel se guarda un corte con:
-  - Total y conteo por estado
-  - Conteo por franja horaria
-  - IDs para detectar cambios entre cortes (reprogramadas)
-Sin datos por técnico. Compatible con Render free tier.
+Registro evolutivo de ordenes por dia para el apartado de reportes.
+
+Reglas del reporte:
+  - Cada foto/corte guarda la hora exacta de captura.
+  - Se permiten varios cortes en el mismo dia.
+  - Solo se conserva informacion del dia actual.
+  - El Excel descargable corresponde unicamente al dia actual.
+  - Se comparan cortes para detectar diferencias por estado, franja y orden.
 """
 import io
+import json
 import logging
+import os
+import tempfile
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Almacenamiento en memoria: {fecha_str: [corte, ...]}
+# Almacenamiento en memoria y respaldo temporal del dia actual.
+# En Render esto evita perder cortes durante el mismo proceso, sin conservar dias anteriores.
 _store: dict = {}
+_STORE_FILE = os.environ.get(
+    "REPORT_SNAPSHOT_FILE",
+    os.path.join(tempfile.gettempdir(), "nivelacion_pro_reporte_hoy.json"),
+)
 
-# Estados agrupados para el reporte
 _GRUPOS = {
     "Programadas":    {"programado", "programada"},
     "Por Programar":  {"por programar"},
     "En Proceso":     {"en camino", "en sitio", "iniciado", "iniciada",
                        "mac enviada", "mac principal enviada",
                        "dispositivos subidos", "dispositivos cargados"},
-    "Finalizadas":    {"finalizado", "finalizada", "cerrado", "cerrada"},
+    "Finalizadas":    {"finalizado", "finalizada", "cerrado", "cerrada", "completado", "completada"},
     "Por Auditar":    {"por auditar"},
-    "Canceladas":     {"cancelado", "cancelada"},
+    "Canceladas":     {"cancelado", "cancelada", "cancelada por cliente", "cancelado por cliente"},
 }
 
-# Orden de visualización en la tabla
 CAMPOS = ["Total", "Programadas", "Por Programar", "Reprogramadas",
           "En Proceso", "Finalizadas", "Por Auditar", "Canceladas"]
 
 
 def _now_naive() -> datetime:
-    """Datetime naive en hora Bogotá."""
+    """Datetime naive en hora Bogota."""
     from config import now_bogota
     dt = now_bogota()
     return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
 
+def _today() -> str:
+    return _now_naive().strftime("%Y-%m-%d")
+
+
+def _norm_estado(value) -> str:
+    """Normaliza estado para que el reporte no dependa de mayusculas o tildes."""
+    try:
+        from services.normalization import norm_status
+        return norm_status(value)
+    except Exception:
+        s = str(value or "").strip().lower()
+        for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u")):
+            s = s.replace(a, b)
+        return s
+
+
+def _estado_grupo(estado: str) -> str:
+    s = _norm_estado(estado)
+    if "cancelad" in s:
+        return "Canceladas"
+    if "por auditar" in s:
+        return "Por Auditar"
+    if any(x in s for x in ("finaliz", "cerrad", "completad")):
+        return "Finalizadas"
+    if "por programar" in s:
+        return "Por Programar"
+    if any(x in s for x in ("programad", "programado")):
+        return "Programadas"
+    if any(x in s for x in ("en camino", "en sitio", "iniciad", "mac", "dispositivos")):
+        return "En Proceso"
+    return "Otros"
+
+
 def _hora_label(dt: datetime) -> str:
-    """Etiqueta descriptiva por hora del día."""
+    """Etiqueta descriptiva por hora del dia."""
     h = dt.hour
-    if 5 <= h < 10:   return f"Mañana {dt.strftime('%H:%M')}"
-    if 10 <= h < 14:  return f"Mediodía {dt.strftime('%H:%M')}"
-    if 14 <= h < 19:  return f"Tarde {dt.strftime('%H:%M')}"
-    return f"Cierre {dt.strftime('%H:%M')}"
+    if 5 <= h < 10:
+        return f"Manana {dt.strftime('%H:%M:%S')}"
+    if 10 <= h < 14:
+        return f"Mediodia {dt.strftime('%H:%M:%S')}"
+    if 14 <= h < 19:
+        return f"Tarde {dt.strftime('%H:%M:%S')}"
+    return f"Cierre {dt.strftime('%H:%M:%S')}"
+
+
+def _purge_old_days() -> None:
+    """Mantiene solamente cortes del dia actual y borra respaldos viejos."""
+    global _store
+    hoy = _today()
+    if _store and set(_store.keys()) != {hoy}:
+        _store = {hoy: _store.get(hoy, [])}
+    try:
+        if os.path.exists(_STORE_FILE):
+            with open(_STORE_FILE, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if payload.get("fecha") != hoy:
+                os.remove(_STORE_FILE)
+    except Exception as exc:
+        logger.warning("No se pudo depurar reporte diario: %s", exc)
+
+
+def _load_store() -> None:
+    """Carga el respaldo temporal del dia actual, si existe."""
+    global _store
+    hoy = _today()
+    _purge_old_days()
+    if _store.get(hoy):
+        return
+    try:
+        if not os.path.exists(_STORE_FILE):
+            _store.setdefault(hoy, [])
+            return
+        with open(_STORE_FILE, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if payload.get("fecha") == hoy:
+            _store = {hoy: payload.get("cortes", []) or []}
+        else:
+            _store = {hoy: []}
+    except Exception as exc:
+        logger.warning("No se pudo cargar reporte diario: %s", exc)
+        _store.setdefault(hoy, [])
+
+
+def _save_store() -> None:
+    """Guarda solo el reporte del dia actual."""
+    hoy = _today()
+    os.makedirs(os.path.dirname(_STORE_FILE), exist_ok=True)
+    payload = {"fecha": hoy, "cortes": _store.get(hoy, [])}
+    tmp = f"{_STORE_FILE}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+    os.replace(tmp, _STORE_FILE)
+
+
+def _order_id(order: dict, pos: int) -> str:
+    oid = str(order.get("id") or order.get("orden") or order.get("appointment_id") or "").strip()
+    return oid if oid and oid.lower() not in ("none", "nan") else f"row_{pos}"
 
 
 def _clasificar(orders: list) -> dict:
-    """Clasifica ordenes por estado, franja y tipo de cita."""
+    """Clasifica ordenes y conserva estado por ID para comparar cortes."""
     por_estado = {g: 0 for g in _GRUPOS}
+    por_estado.setdefault("Otros", 0)
     por_franja: dict = {}
-    por_tipo:   dict = {}
-    ids_programadas = set()
-    ids_todos = set()
-    for o in orders:
+    por_tipo: dict = {}
+    order_state: dict = {}
+
+    for pos, o in enumerate(orders):
         if not isinstance(o, dict):
             continue
-        est    = str(o.get("estado", "")).strip().lower()
-        franja = str(o.get("franja", "Sin Franja")).strip() or "Sin Franja"
-        tipo   = str(o.get("tipo", "otro")).strip().lower() or "otro"
-        oid    = str(o.get("id", ""))
-        ids_todos.add(oid)
-        for grupo, estados in _GRUPOS.items():
-            if est in estados:
-                por_estado[grupo] += 1
-                break
-        if est in {"programado", "programada"}:
-            ids_programadas.add(oid)
+        oid = _order_id(o, pos)
+        estado_raw = o.get("estado", "")
+        estado_norm = _norm_estado(estado_raw)
+        grupo = _estado_grupo(estado_raw)
+        por_estado[grupo] = por_estado.get(grupo, 0) + 1
+
+        franja = str(o.get("franja", "Sin Franja") or "Sin Franja").strip() or "Sin Franja"
+        tipo = str(o.get("tipo", "otro") or "otro").strip().lower() or "otro"
+        tecnico = str(o.get("tecnico", "SIN_ASIGNAR") or "SIN_ASIGNAR").strip() or "SIN_ASIGNAR"
+
         por_franja[franja] = por_franja.get(franja, 0) + 1
         por_tipo[tipo] = por_tipo.get(tipo, 0) + 1
-    return {"total":len(orders),"por_estado":por_estado,
-            "por_franja":dict(sorted(por_franja.items())),
-            "por_tipo":dict(sorted(por_tipo.items())),
-            "_ids_prog":list(ids_programadas),"_ids_todos":list(ids_todos),"reprogramadas":0}
+        order_state[oid] = {
+            "estado": estado_norm,
+            "grupo": grupo,
+            "franja": franja,
+            "tecnico": tecnico,
+            "tipo": tipo,
+        }
+
+    return {
+        "total": len(order_state),
+        "por_estado": por_estado,
+        "por_franja": dict(sorted(por_franja.items())),
+        "por_tipo": dict(sorted(por_tipo.items())),
+        "_order_state": order_state,
+        "reprogramadas": 0,
+        "nuevas": 0,
+        "salieron": 0,
+        "cambios_estado": 0,
+        "cambios_franja": 0,
+        "canceladas_nuevas": 0,
+        "detalle_cambios": [],
+    }
+
+
+def _comparar(anterior: dict, actual: dict) -> None:
+    """Calcula diferencias entre el corte anterior y el actual."""
+    prev = anterior.get("_order_state", {}) or {}
+    curr = actual.get("_order_state", {}) or {}
+    prev_ids = set(prev.keys())
+    curr_ids = set(curr.keys())
+
+    salieron = sorted(prev_ids - curr_ids)
+    nuevas = sorted(curr_ids - prev_ids)
+    comunes = sorted(prev_ids & curr_ids)
+
+    detalle = []
+    cambios_estado = 0
+    cambios_franja = 0
+    canceladas_nuevas = 0
+
+    for oid in comunes:
+        p = prev[oid]
+        c = curr[oid]
+        if p.get("grupo") != c.get("grupo"):
+            cambios_estado += 1
+            detalle.append({
+                "orden": oid,
+                "tipo": "estado",
+                "antes": p.get("grupo"),
+                "despues": c.get("grupo"),
+            })
+        if p.get("franja") != c.get("franja"):
+            cambios_franja += 1
+            detalle.append({
+                "orden": oid,
+                "tipo": "franja",
+                "antes": p.get("franja"),
+                "despues": c.get("franja"),
+            })
+        if c.get("grupo") == "Canceladas" and p.get("grupo") != "Canceladas":
+            canceladas_nuevas += 1
+
+    for oid in salieron[:100]:
+        detalle.append({"orden": oid, "tipo": "salio_del_dia", "antes": prev[oid].get("grupo"), "despues": "No aparece"})
+    for oid in nuevas[:100]:
+        detalle.append({"orden": oid, "tipo": "nueva", "antes": "No aparecia", "despues": curr[oid].get("grupo")})
+
+    actual["salieron"] = len(salieron)
+    actual["nuevas"] = len(nuevas)
+    actual["reprogramadas"] = len(salieron)
+    actual["cambios_estado"] = cambios_estado
+    actual["cambios_franja"] = cambios_franja
+    actual["canceladas_nuevas"] = canceladas_nuevas
+    actual["detalle_cambios"] = detalle[:300]
 
 
 def registrar_corte(orders: list, label: str = None) -> dict:
-    """
-    Registra un corte con el estado actual de las órdenes.
-    Compara automáticamente con el corte anterior para calcular reprogramadas.
-    Devuelve el corte registrado.
-    """
-    now   = _now_naive()
+    """Registra una foto del dia con hora exacta y comparacion contra el corte anterior."""
+    _load_store()
+    now = _now_naive()
     fecha = now.strftime("%Y-%m-%d")
-    hora  = now.strftime("%H:%M:%S")   # Único por segundo
-    etiq  = label or _hora_label(now)
+    hora_exacta = now.strftime("%H:%M:%S")
+    etiqueta = label or _hora_label(now)
 
     stats = _clasificar(orders)
-
-    # Detectar reprogramadas: programadas en corte anterior que ya no están
-    dia = _store.get(fecha, [])
+    dia = _store.setdefault(fecha, [])
     if dia:
-        anterior = dia[-1]
-        ids_prog_ant = set(anterior.get("_ids_prog", []))
-        ids_ahora    = set(stats["_ids_todos"])
-        stats["reprogramadas"] = len(ids_prog_ant - ids_ahora)
+        _comparar(dia[-1], stats)
 
     corte = {
-        "id":           f"{fecha}_{hora}",
-        "label":        etiq,
-        "fecha":        fecha,
-        "hora":         now.strftime("%H:%M"),
-        "timestamp":    now.isoformat(sep=" ", timespec="seconds"),
-        "total":        stats["total"],
-        "por_estado":   stats["por_estado"],
-        "por_franja":   stats["por_franja"],
-        "por_tipo":     stats["por_tipo"],
+        "id": f"{fecha}_{hora_exacta}_{len(dia) + 1}",
+        "label": etiqueta,
+        "fecha": fecha,
+        "hora": hora_exacta,
+        "hora_exacta": hora_exacta,
+        "timestamp": now.isoformat(sep=" ", timespec="seconds"),
+        "total": stats["total"],
+        "por_estado": stats["por_estado"],
+        "por_franja": stats["por_franja"],
+        "por_tipo": stats["por_tipo"],
         "reprogramadas": stats["reprogramadas"],
-        "_ids_prog":    stats["_ids_prog"],
-        "_ids_todos":   stats["_ids_todos"],
+        "salieron": stats["salieron"],
+        "nuevas": stats["nuevas"],
+        "cambios_estado": stats["cambios_estado"],
+        "cambios_franja": stats["cambios_franja"],
+        "canceladas_nuevas": stats["canceladas_nuevas"],
+        "detalle_cambios": stats["detalle_cambios"],
+        "_order_state": stats["_order_state"],
     }
-
-    if fecha not in _store:
-        _store[fecha] = []
-    _store[fecha].append(corte)
+    dia.append(corte)
+    _save_store()
 
     logger.info(
-        f"Corte '{etiq}' | total={corte['total']} "
-        f"prog={stats['por_estado'].get('Programadas',0)} "
-        f"fin={stats['por_estado'].get('Finalizadas',0)} "
-        f"cancel={stats['por_estado'].get('Canceladas',0)} "
-        f"reprog={corte['reprogramadas']}"
+        "Corte %s %s | total=%s cancel=%s reprog=%s estado=%s franja=%s",
+        fecha, hora_exacta, corte["total"], corte["por_estado"].get("Canceladas", 0),
+        corte["reprogramadas"], corte["cambios_estado"], corte["cambios_franja"],
     )
     return corte
 
 
+def _public(corte: dict) -> dict:
+    return {k: v for k, v in corte.items() if not k.startswith("_")}
+
+
 def get_cortes(fecha: str = None) -> list:
-    """Devuelve los cortes del día (hoy por defecto)."""
-    if not fecha:
-        fecha = _now_naive().strftime("%Y-%m-%d")
-    return list(_store.get(fecha, []))
+    """Devuelve cortes solo del dia actual. Fechas anteriores vencen automaticamente."""
+    _load_store()
+    hoy = _today()
+    if fecha and fecha != hoy:
+        return []
+    return [_public(c) for c in _store.get(hoy, [])]
 
 
 def get_fechas() -> list:
-    return sorted(_store.keys(), reverse=True)
+    """El selector solo muestra el dia vigente para no mezclar reportes."""
+    _load_store()
+    hoy = _today()
+    return [hoy] if _store.get(hoy) else []
 
 
 def _delta_color(campo: str, delta: int) -> str:
-    """Color semántico: verde=bueno, rojo=atención."""
     if delta == 0:
-        return "00000000"   # Transparente
-    bien_subir  = {"Finalizadas", "Por Auditar"}
-    bien_bajar  = {"Canceladas", "Por Programar", "Reprogramadas"}
+        return "00000000"
+    bien_subir = {"Finalizadas", "Por Auditar"}
+    bien_bajar = {"Canceladas", "Por Programar", "Reprogramadas"}
     if campo in bien_subir:
         return "D5E8D4" if delta > 0 else "F8CECC"
     if campo in bien_bajar:
         return "D5E8D4" if delta < 0 else "F8CECC"
-    return "FFF2CC"   # Amarillo suave para neutros
+    return "FFF2CC"
 
 
 def generar_excel(fecha: str = None) -> bytes:
-    """
-    Genera Excel con la evolución del día.
-    Hojas:
-      1. Evolución por Estado (comparativa entre cortes)
-      2. Evolución por Franja (comparativa entre cortes)
-      3. Detalle completo de cada corte
-    """
+    """Genera el unico Excel descargable del dia actual."""
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -167,13 +331,14 @@ def generar_excel(fecha: str = None) -> bytes:
     except ImportError:
         raise RuntimeError("openpyxl no instalado")
 
-    if not fecha:
-        fecha = _now_naive().strftime("%Y-%m-%d")
-
+    hoy = _today()
+    if fecha and fecha != hoy:
+        raise ValueError("El reporte solicitado ya vencio. Solo se puede descargar el informe del dia actual.")
+    fecha = hoy
     cortes = get_cortes(fecha)
+
     wb = Workbook()
 
-    # ── Helpers de estilo ──────────────────────────────────────────────
     def F(bold=False, color="000000", sz=10, italic=False):
         return Font(bold=bold, color=color, size=sz, italic=italic)
 
@@ -181,33 +346,27 @@ def generar_excel(fecha: str = None) -> bytes:
         return PatternFill("solid", fgColor=hex_) if hex_ and hex_ != "00000000" else PatternFill()
 
     CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    LEFT   = Alignment(horizontal="left",   vertical="center")
-    THIN   = Border(*[Side(style="thin")] * 4)
-
-    HDR_BG    = "1F3864"
-    COL_BG    = "2E5FA3"
+    LEFT = Alignment(horizontal="left", vertical="center")
+    THIN = Border(*[Side(style="thin")] * 4)
+    HDR_BG = "1F3864"
+    COL_BG = "2E5FA3"
     FRANJA_BG = "1A5276"
-    TITLE_BG  = "D6E4F0"
+    TITLE_BG = "D6E4F0"
 
-    # ── Hoja 1: Evolución por Estado ──────────────────────────────────
+    cols_total = max(2, 1 + len(cortes) + max(len(cortes) - 1, 0))
+
     ws1 = wb.active
     ws1.title = "Por Estado"
-
-    # Título
-    cols_total = 1 + len(cortes) + max(len(cortes) - 1, 0)
-    ws1.merge_cells(f"A1:{get_column_letter(cols_total + 1)}1")
-    ws1["A1"] = f"Evolución de Órdenes por Estado — {fecha}"
+    ws1.merge_cells(f"A1:{get_column_letter(cols_total)}1")
+    ws1["A1"] = f"Evolucion de Ordenes por Estado - {fecha}"
     ws1["A1"].font = F(bold=True, sz=13, color=HDR_BG)
     ws1["A1"].fill = Fill(TITLE_BG)
     ws1["A1"].alignment = CENTER
-    ws1.row_dimensions[1].height = 28
 
     if not cortes:
         ws1["A3"] = "Sin cortes registrados para esta fecha."
         ws1["A3"].font = F(color="888888", italic=True)
     else:
-        # Encabezados
-        r = 3
         def hdr(cell, txt, bg=HDR_BG):
             cell.value = txt
             cell.font = F(bold=True, color="FFFFFF", sz=10)
@@ -215,246 +374,154 @@ def generar_excel(fecha: str = None) -> bytes:
             cell.alignment = CENTER
             cell.border = THIN
 
+        r = 3
         hdr(ws1.cell(r, 1), "Estado")
         col = 2
-        slot_cols  = []
-        delta_cols = []
-
+        slot_cols, delta_cols = [], []
         for c in cortes:
-            hdr(ws1.cell(r, col), f"{c['label']}\n{c['hora']}", bg=COL_BG)
+            hdr(ws1.cell(r, col), f"{c['label']}\n{c.get('hora_exacta') or c['hora']}", bg=COL_BG)
             slot_cols.append(col)
             col += 1
         for i in range(len(cortes) - 1):
-            hdr(ws1.cell(r, col), f"Δ {cortes[i]['hora']} → {cortes[i+1]['hora']}", bg="4A235A")
+            hdr(ws1.cell(r, col), f"Delta {cortes[i]['hora']} -> {cortes[i+1]['hora']}", bg="4A235A")
             delta_cols.append(col)
             col += 1
+        ws1.row_dimensions[r].height = 38
 
-        ws1.row_dimensions[r].height = 36
+        campos = ["Total", "Programadas", "Por Programar", "Reprogramadas", "En Proceso",
+                  "Finalizadas", "Por Auditar", "Canceladas", "Nuevas", "Cambios Estado", "Cambios Franja"]
 
-        # Fila Total
-        r += 1
-        ws1.cell(r, 1, "Total").font = F(bold=True)
-        ws1.cell(r, 1).border = THIN
-        for i, c in enumerate(cortes):
-            cell = ws1.cell(r, slot_cols[i], c["total"])
-            cell.font = F(bold=True, color=HDR_BG, sz=11)
-            cell.alignment = CENTER
-            cell.border = THIN
-        for i, dcol in enumerate(delta_cols):
-            d = cortes[i+1]["total"] - cortes[i]["total"]
-            arrow = "▲" if d>0 else "▼" if d<0 else "→"
-            cell = ws1.cell(r, dcol, f"{arrow} {d:+d}")
-            cell.alignment = CENTER
-            cell.border = THIN
-            cell.font = F(bold=True, sz=10)
+        def val(corte, campo):
+            if campo == "Total": return corte.get("total", 0)
+            if campo == "Reprogramadas": return corte.get("reprogramadas", 0)
+            if campo == "Nuevas": return corte.get("nuevas", 0)
+            if campo == "Cambios Estado": return corte.get("cambios_estado", 0)
+            if campo == "Cambios Franja": return corte.get("cambios_franja", 0)
+            return (corte.get("por_estado") or {}).get(campo, 0)
 
-        # Fila Reprogramadas
-        r += 1
-        ws1.cell(r, 1, "Reprogramadas (salieron del día)").font = F(italic=True)
-        ws1.cell(r, 1).border = THIN
-        for i, c in enumerate(cortes):
-            v = c.get("reprogramadas", 0)
-            cell = ws1.cell(r, slot_cols[i], v)
-            cell.alignment = CENTER
-            cell.border = THIN
-            if v > 0:
-                cell.fill = Fill("F8CECC")
-        for i, dcol in enumerate(delta_cols):
-            d = cortes[i+1].get("reprogramadas", 0) - cortes[i].get("reprogramadas", 0)
-            cell = ws1.cell(r, dcol, f"{'▲' if d>0 else '▼' if d<0 else '→'} {d:+d}" if d != 0 else "→ 0")
-            cell.alignment = CENTER
-            cell.border = THIN
-            cell.fill = Fill(_delta_color("Reprogramadas", d))
-
-        # Filas por estado
-        for campo in list(_GRUPOS.keys()):
+        for campo in campos:
             r += 1
             ws1.cell(r, 1, campo).border = THIN
             ws1.cell(r, 1).alignment = LEFT
+            if campo == "Total":
+                ws1.cell(r, 1).font = F(bold=True)
             for i, c in enumerate(cortes):
-                v = c["por_estado"].get(campo, 0)
-                cell = ws1.cell(r, slot_cols[i], v)
+                cell = ws1.cell(r, slot_cols[i], val(c, campo))
                 cell.alignment = CENTER
                 cell.border = THIN
+                if campo == "Total":
+                    cell.font = F(bold=True, color=HDR_BG)
             for i, dcol in enumerate(delta_cols):
-                va = cortes[i]["por_estado"].get(campo, 0)
-                vb = cortes[i+1]["por_estado"].get(campo, 0)
-                d  = vb - va
-                arrow = "▲" if d>0 else "▼" if d<0 else "→"
-                cell = ws1.cell(r, dcol, f"{arrow} {d:+d}")
+                d = val(cortes[i + 1], campo) - val(cortes[i], campo)
+                arrow = "UP" if d > 0 else "DOWN" if d < 0 else "="
+                cell = ws1.cell(r, dcol, f"{arrow} {d:+d}" if d else "= 0")
                 cell.alignment = CENTER
                 cell.border = THIN
                 cell.fill = Fill(_delta_color(campo, d))
                 cell.font = F(bold=True, sz=10)
 
-        # Anchos
-        ws1.column_dimensions["A"].width = 32
+        ws1.column_dimensions["A"].width = 24
         for c in range(2, col):
-            ws1.column_dimensions[get_column_letter(c)].width = 16
+            ws1.column_dimensions[get_column_letter(c)].width = 18
         ws1.freeze_panes = "B4"
 
-    # ── Hoja 2: Evolución por Franja ──────────────────────────────────
     ws2 = wb.create_sheet("Por Franja")
-
-    # Recoger todas las franjas únicas
-    all_franjas = []
-    for c in cortes:
-        for f in c.get("por_franja", {}):
-            if f not in all_franjas:
-                all_franjas.append(f)
-    all_franjas = sorted(all_franjas)
-
-    ws2.merge_cells(f"A1:{get_column_letter(max(2, cols_total + 1))}1")
-    ws2["A1"] = f"Evolución de Visitas por Franja Horaria — {fecha}"
+    all_franjas = sorted({f for c in cortes for f in (c.get("por_franja") or {})})
+    ws2.merge_cells(f"A1:{get_column_letter(max(2, cols_total))}1")
+    ws2["A1"] = f"Evolucion por Franja Horaria - {fecha}"
     ws2["A1"].font = F(bold=True, sz=13, color=HDR_BG)
     ws2["A1"].fill = Fill(TITLE_BG)
     ws2["A1"].alignment = CENTER
-    ws2.row_dimensions[1].height = 28
 
     if cortes and all_franjas:
-        r2 = 3
         def hdr2(cell, txt, bg=FRANJA_BG):
             cell.value = txt
             cell.font = F(bold=True, color="FFFFFF", sz=10)
             cell.fill = Fill(bg)
             cell.alignment = CENTER
             cell.border = THIN
-
+        r2 = 3
         hdr2(ws2.cell(r2, 1), "Franja Horaria")
         col2 = 2
         s_cols, d_cols = [], []
         for c in cortes:
-            hdr2(ws2.cell(r2, col2), f"{c['label']}\n{c['hora']}", bg=FRANJA_BG)
+            hdr2(ws2.cell(r2, col2), f"{c['label']}\n{c['hora']}")
             s_cols.append(col2)
             col2 += 1
-        for i in range(len(cortes) - 1):
-            hdr2(ws2.cell(r2, col2), f"Δ {cortes[i]['hora']} → {cortes[i+1]['hora']}", bg="1A3A4A")
+        for _ in range(len(cortes) - 1):
+            hdr2(ws2.cell(r2, col2), "Delta", bg="1A3A4A")
             d_cols.append(col2)
             col2 += 1
-        ws2.row_dimensions[r2].height = 36
-
         for franja in all_franjas:
             r2 += 1
-            ws2.cell(r2, 1, franja).border = THIN
-            ws2.cell(r2, 1).alignment = LEFT
-            es_sin = franja.lower() == "sin franja"
-            if es_sin:
-                ws2.cell(r2, 1).font = F(italic=True, color="888888")
-
+            ws2.cell(r2, 1, franja).alignment = LEFT
+            ws2.cell(r2, 1).border = THIN
             for i, c in enumerate(cortes):
-                v = c["por_franja"].get(franja, 0)
-                cell = ws2.cell(r2, s_cols[i], v)
+                cell = ws2.cell(r2, s_cols[i], (c.get("por_franja") or {}).get(franja, 0))
                 cell.alignment = CENTER
                 cell.border = THIN
-                if es_sin and v > 0:
-                    cell.fill = Fill("FFF2CC")
-
             for i, dcol in enumerate(d_cols):
-                va = cortes[i]["por_franja"].get(franja, 0)
-                vb = cortes[i+1]["por_franja"].get(franja, 0)
-                d  = vb - va
-                arrow = "▲" if d>0 else "▼" if d<0 else "→"
-                cell = ws2.cell(r2, dcol, f"{arrow} {d:+d}" if d != 0 else "→ 0")
+                d = (cortes[i + 1].get("por_franja") or {}).get(franja, 0) - (cortes[i].get("por_franja") or {}).get(franja, 0)
+                cell = ws2.cell(r2, dcol, f"{d:+d}" if d else "0")
                 cell.alignment = CENTER
                 cell.border = THIN
-                # Para franjas: más visitas no es necesariamente malo
-                cell.fill = Fill("FFF2CC") if abs(d) > 0 else PatternFill()
-
         ws2.column_dimensions["A"].width = 22
         for c in range(2, col2):
             ws2.column_dimensions[get_column_letter(c)].width = 16
         ws2.freeze_panes = "B4"
 
-    # ── Hoja 3: Detalle de cada corte ────────────────────────────────
+    ws3 = wb.create_sheet("Cambios")
+    ws3.append(["Corte", "Hora", "Orden", "Tipo cambio", "Antes", "Despues"])
+    for cell in ws3[1]:
+        cell.font = F(bold=True, color="FFFFFF")
+        cell.fill = Fill(HDR_BG)
+        cell.alignment = CENTER
+        cell.border = THIN
     for corte in cortes:
-        safe = corte["label"][:28]
-        ws3 = wb.create_sheet(safe)
+        for d in corte.get("detalle_cambios", []) or []:
+            ws3.append([corte.get("label"), corte.get("hora"), d.get("orden"), d.get("tipo"), d.get("antes"), d.get("despues")])
+    for col, width in zip("ABCDEF", [22, 12, 18, 18, 24, 24]):
+        ws3.column_dimensions[col].width = width
 
-        ws3.merge_cells("A1:C1")
-        ws3["A1"] = f"{corte['label']}  —  {corte['fecha']} {corte['hora']}"
-        ws3["A1"].font = F(bold=True, sz=12, color=HDR_BG)
-        ws3["A1"].fill = Fill(TITLE_BG)
-        ws3["A1"].alignment = CENTER
-        ws3.row_dimensions[1].height = 24
-
-        # Estados
-        ws3.cell(3, 1, "Estado").font = F(bold=True, color="FFFFFF")
-        ws3.cell(3, 1).fill = Fill(HDR_BG)
-        ws3.cell(3, 2, "Cantidad").font = F(bold=True, color="FFFFFF")
-        ws3.cell(3, 2).fill = Fill(HDR_BG)
-        for c in [ws3.cell(3, 1), ws3.cell(3, 2)]:
-            c.alignment = CENTER
-            c.border = THIN
-
-        filas = [("Total", corte["total"]),
-                 ("Reprogramadas (salieron del día)", corte.get("reprogramadas", 0))]
-        filas += [(k, v) for k, v in corte["por_estado"].items()]
-
-        for ri, (k, v) in enumerate(filas, start=4):
-            ws3.cell(ri, 1, k).border = THIN
-            ws3.cell(ri, 1).alignment = LEFT
-            cell = ws3.cell(ri, 2, v)
-            cell.alignment = CENTER
+    for corte in cortes:
+        safe = (corte["label"][:24] + " " + corte["hora"].replace(":", ""))[:31]
+        ws = wb.create_sheet(safe)
+        ws.merge_cells("A1:C1")
+        ws["A1"] = f"{corte['label']} - {corte['fecha']} {corte['hora']}"
+        ws["A1"].font = F(bold=True, sz=12, color=HDR_BG)
+        ws["A1"].fill = Fill(TITLE_BG)
+        ws["A1"].alignment = CENTER
+        ws.append([])
+        ws.append(["Estado", "Cantidad"])
+        for cell in ws[3]:
+            cell.font = F(bold=True, color="FFFFFF")
+            cell.fill = Fill(HDR_BG)
             cell.border = THIN
-            if k == "Total":
-                ws3.cell(ri, 1).font = F(bold=True)
-                cell.font = F(bold=True, color=HDR_BG)
-            if k == "Reprogramadas (salieron del día)" and v > 0:
-                cell.fill = Fill("F8CECC")
-
-        # Franjas
-        r3 = len(filas) + 6
-        ws3.cell(r3, 1, "Franja Horaria").font = F(bold=True, color="FFFFFF")
-        ws3.cell(r3, 1).fill = Fill(FRANJA_BG)
-        ws3.cell(r3, 1).alignment = CENTER
-        ws3.cell(r3, 2, "Visitas").font = F(bold=True, color="FFFFFF")
-        ws3.cell(r3, 2).fill = Fill(FRANJA_BG)
-        ws3.cell(r3, 2).alignment = CENTER
-        for c in [ws3.cell(r3, 1), ws3.cell(r3, 2)]:
-            c.border = THIN
-
-        for franja, v in sorted(corte["por_franja"].items()):
-            r3 += 1
-            ws3.cell(r3, 1, franja).border = THIN
-            ws3.cell(r3, 1).alignment = LEFT
-            cell = ws3.cell(r3, 2, v)
             cell.alignment = CENTER
-            cell.border = THIN
-            if franja.lower() == "sin franja" and v > 0:
-                cell.fill = Fill("FFF2CC")
+        filas = [("Total", corte.get("total", 0)), ("Reprogramadas", corte.get("reprogramadas", 0)),
+                 ("Nuevas", corte.get("nuevas", 0)), ("Cambios Estado", corte.get("cambios_estado", 0)),
+                 ("Cambios Franja", corte.get("cambios_franja", 0))]
+        filas += [(k, v) for k, v in (corte.get("por_estado") or {}).items()]
+        for k, v in filas:
+            ws.append([k, v])
+        ws.column_dimensions["A"].width = 28
+        ws.column_dimensions["B"].width = 14
 
-        ws3.column_dimensions["A"].width = 32
-        ws3.column_dimensions["B"].width = 12
-
-    # ── Hoja de instrucciones ─────────────────────────────────────────
     wsi = wb.create_sheet("Instrucciones")
     lines = [
-        ("Reporte Evolutivo — Nivelación Pro", True, 13),
-        ("", False, 10),
-        ("Cómo funciona:", True, 11),
-        ("• Cada vez que subes el Excel al dashboard se guarda un corte automáticamente.", False, 10),
-        ("• El corte registra: estado de las órdenes + visitas por franja horaria.", False, 10),
-        ("• 'Reprogramadas' = órdenes que estaban como Programadas y ya no aparecen en el siguiente corte.", False, 10),
-        ("  Se entiende que fueron movidas a otro día o canceladas entre cortes.", False, 10),
-        ("", False, 10),
-        ("Lectura de los deltas (columnas Δ):", True, 11),
-        ("  ▲ con fondo verde = mejora operativa (más finalizadas, menos canceladas)", False, 10),
-        ("  ▲ con fondo rojo  = requiere atención (más canceladas, más sin franja)", False, 10),
-        ("  → sin cambio", False, 10),
-        ("", False, 10),
-        ("Hojas incluidas:", True, 11),
-        ("• 'Por Estado' — evolución de cada estado entre cortes del día", False, 10),
-        ("• 'Por Franja' — evolución de visitas por franja horaria", False, 10),
-        ("• Un detalle por cada corte registrado", False, 10),
+        "Reporte diario de seguimiento fotografico",
+        "Cada corte guarda la hora exacta en que se tomo la foto.",
+        "El archivo contiene solamente cortes del dia actual.",
+        "Al cambiar de dia, los cortes anteriores vencen y no quedan disponibles.",
+        "Reprogramadas = ordenes que estaban en el corte anterior y ya no aparecen en el corte actual.",
+        "Cambios Estado y Cambios Franja se calculan comparando las mismas ordenes entre cortes.",
     ]
-    for ri, (txt, bold, sz) in enumerate(lines, start=1):
-        c = wsi.cell(ri, 1, txt)
-        c.font = F(bold=bold, sz=sz)
-    wsi.column_dimensions["A"].width = 85
+    for i, txt in enumerate(lines, start=1):
+        wsi.cell(i, 1, txt).font = F(bold=(i == 1), sz=12 if i == 1 else 10)
+    wsi.column_dimensions["A"].width = 110
 
-    # ── Guardar ───────────────────────────────────────────────────────
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    logger.info(f"Excel generado: {len(cortes)} cortes del {fecha}")
+    logger.info("Excel de reporte generado: %s cortes del %s", len(cortes), fecha)
     return buf.getvalue()

@@ -32,6 +32,8 @@ def get_snapshots():
             "fecha": hoy,
             "fecha_solicitada": fecha,
             "cortes": cortes,
+            "resumen": ss.get_resumen_ejecutivo(fecha),
+            "ordenes_reprogramadas": ss.get_ordenes_reprogramadas_consolidadas(fecha),
             "total": len(cortes),
             "fechas": ss.get_fechas(),
             "solo_hoy": True,
@@ -49,16 +51,31 @@ def post_snapshot():
         if not orders:
             return jsonify({"status": "error", "message": "No hay datos. Sube el Excel primero."}), 400
         body = request.get_json(silent=True) or {}
-        corte = ss.registrar_corte(orders, body.get("label"))
+        corte = ss.registrar_corte(orders, body.get("label"), body.get("hora_manual"))
         visible = {k: v for k, v in corte.items() if not k.startswith("_")}
         return jsonify({
             "status": "ok",
-            "mensaje": f"Foto registrada a las {corte['hora']} - {corte['total']} ordenes",
+            "mensaje": f"Corte registrado a las {corte['hora']} - {corte['total']} ordenes",
             "corte": visible,
         })
     except Exception as e:
         logger.exception("Error en /api/reports/snapshot")
         return jsonify({"status": "error", "message": f"Error al tomar foto: {str(e)}"}), 500
+
+
+@reports_bp.post("/reset")
+def post_reset():
+    try:
+        ss.reset_reporte_diario()
+        return jsonify({
+            "status": "ok",
+            "mensaje": "Informe diario reiniciado. Ya puedes tomar el primer corte limpio del dia.",
+            "cortes": [],
+            "resumen": ss.get_resumen_ejecutivo(),
+        })
+    except Exception as e:
+        logger.exception("Error reiniciando reporte diario")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @reports_bp.get("/export")

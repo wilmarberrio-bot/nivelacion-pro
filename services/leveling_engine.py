@@ -238,10 +238,23 @@ def run_leveling(raw_orders):
     cpt=[]
     for t,ol in sorted(idx["tech_orders"].items()):
         tot=len(ol); mov=sum(1 for o in ol if o["movible"])
-        act=sum(1 for o in ol if 1<=o.get("progress",0)<6)
+        def es_camino(o):
+            return "en camino" in norm_status(o.get("estado",""))
+        def es_sitio_operativo(o):
+            st=norm_status(o.get("estado",""))
+            # Para visualizacion operativa, estos estados se agrupan como Sit:
+            # En sitio, Iniciado, MAC enviada y Dispositivos subidos/cargados.
+            return any(k in st for k in [
+                "en sitio","iniciado","iniciada","mac enviada","mac principal enviada",
+                "dispositivos subidos","dispositivos cargados","dispositivo subido",
+                "dispositivo cargado","subidos","subido"
+            ])
+        cam=sum(1 for o in ol if es_camino(o))
+        act=sum(1 for o in ol if es_sitio_operativo(o))
         fin=sum(1 for o in ol if o.get("progress",0)>=6)
+        canc=sum(1 for o in ol if "cancel" in norm_status(o.get("estado","")))
         cpt.append({"tecnico":t,"zona":idx["tech_main_zone"].get(t,"SIN_ZONA"),"total":tot,
-            "movibles":mov,"bloqueadas":tot-mov,"activas":act,"finalizadas":fin,
+            "movibles":mov,"bloqueadas":tot-mov,"camino":cam,"activas":act,"finalizadas":fin,"canceladas":canc,
             "sobrecarga":tot>MAX_IDEAL_LOAD,"franjas":idx["tech_franja"].get(t,{}),
             "subzonas":list(idx["tech_subzones"].get(t,set()))})
     from config import FRANJAS

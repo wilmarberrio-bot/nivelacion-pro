@@ -108,6 +108,7 @@ STATUS_PROGRESS = {
 # ─────────────────────────────────────────────
 # UMBRALES OPERATIVOS
 # ─────────────────────────────────────────────
+MIN_IDEAL_LOAD          = 3     # Carga ideal mínima por técnico
 MAX_IDEAL_LOAD          = 5     # Carga ideal máxima por técnico
 MAX_ABSOLUTE_LOAD       = 6     # Máximo absoluto (Lun-Vie)
 MAX_ORDERS_PER_SLOT     = 2     # Máximo de órdenes en una misma franja
@@ -118,8 +119,11 @@ MAX_ORDER_DURATION_HOURS = 1.5
 MAX_ALLOWED_DISTANCE_KM = 8.0
 MAX_SUBZONES_SOFT       = 3
 
-# Alerta de "En sitio" prolongado (minutos)
-ONSITE_ALERT_MINUTES    = int(os.environ.get("ONSITE_ALERT_MINUTES", "90"))
+# Alertas de tiempo (minutos)
+ONSITE_ALERT_MINUTES              = int(os.environ.get("ONSITE_ALERT_MINUTES",   "30"))   # Max en sitio sin finalizar
+INICIADO_ALERT_MINUTES            = int(os.environ.get("INICIADO_ALERT_MINUTES", "90"))   # Max en estado Iniciado
+ACTIVE_SLOT_NO_PROGRESS_MINUTES   = int(os.environ.get("ACTIVE_SLOT_NO_PROGRESS_MINUTES", "45"))  # Franja activa sin marcar
+SLOT_RISK_MINUTES_BEFORE_END      = int(os.environ.get("SLOT_RISK_MINUTES_BEFORE_END",    "30"))  # Minutos antes de fin de franja para alertar
 
 # Técnico con N+ órdenes en una franja = sobrecarga
 OVERLOAD_PER_SLOT       = 2
@@ -156,10 +160,4 @@ ZONE_ADJACENCY = {
 # ─────────────────────────────────────────────
 # CACHE EN MEMORIA (TTL en segundos)
 # ─────────────────────────────────────────────
-DATA_CACHE_TTL = int(os.environ.get("DATA_CACHE_TTL", "300"))  # 5 minutos por defecto
-
-# ─────────────────────────────────────────────
-# GOOGLE SHEETS — Export diario
-# ─────────────────────────────────────────────
-# Pegar aquí la URL del Web App del Apps Script después de publicarlo
-SHEETS_WEBAPP_URL = os.environ.get("SHEETS_WEBAPP_URL", "")
+DATA_CACHE_TTL = int(os.environ.get("DATA_CACHE_TT

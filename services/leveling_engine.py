@@ -587,6 +587,27 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
             score += (donor_total - MAX_IDEAL_LOAD) * 500
 
     # ─── Verificar capacidad de franja ───
+    # Regla 1: NO sugerir si el receptor ya tiene 1 orden en esa franja.
+    #   Motivo: crear un duplicado vía sugerencia no mejora productividad ni
+    #   desplazamiento — solo genera riesgo en ambas órdenes del slot.
+    #   El schedule original puede tener duplicados si el coordinador los planeó,
+    #   pero el motor NO los crea de nuevo via sugerencias.
+    current_in_franja = tech_franja.get(receiver, {}).get(order["franja"], 0)
+    if current_in_franja >= 1:
+        return -9999.0  # Franja ya ocupada — bloqueo por política operativa
+
+    # Regla 2: La franja 14:30 NUNCA se duplica.
+    #   Es el último bloque del día. Dos instalaciones en 1.5h al cierre
+    #   garantizan incumplimiento de al menos una. Se protege siempre.
+    franja_start_check, _ = parse_franja_hours(order["franja"])
+    if franja_start_check is not None and franja_start_check >= 14.5:
+        tarde_recv = sum(
+            c for f, c in tech_franja.get(receiver, {}).items()
+            if (parse_franja_hours(f)[0] or 0) >= 14.5
+        )
+        if tarde_recv >= 1:
+            return -9999.0  # Franja tarde ya tiene orden — no duplicar nunca
+
     can_add, _ = _can_add_to_franja(receiver, order["franja"], tech_franja,
                                      tech_orders, current_hour)
     if not can_add:

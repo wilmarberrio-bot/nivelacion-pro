@@ -301,3 +301,67 @@ def get_appointments_export():
     except Exception as e:
         logger.exception("Error en /api/appointments/export")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ─── /api/export-sheets ──────────────────────
+# Botón "Exportar a Sheets" del dashboard
+
+@api_bp.post("/export-sheets")
+def post_export_sheets():
+    """
+    Toma el estado actual de todas las órdenes y lo envía al
+    Apps Script Web App de Google Sheets para acumulación diaria.
+    Requiere variable de entorno SHEETS_WEBAPP_URL configurada en Render.
+    """
+    import urllib.request, json as _json, ssl
+    from config import SHEETS_WEBAPP_URL
+
+    if not SHEETS_WEBAPP_URL:
+        return jsonify({
+            "status": "error",
+            "message": "SHEETS_WEBAPP_URL no configurado. Agrégalo como variable de entorno en Render."
+        }), 400
+
+    try:
+        result  = _get_result()
+        movibles   = result.get("ordenes_movibles",  [])
+        bloqueadas = result.get("ordenes_bloqueadas", [])
+
+        ordenes = []
+        for o in (movibles + bloqueadas):
+            ordenes.append({
+                "id":         str(o.get("id", "")),
+                "tipo":       o.get("tipo",       ""),
+                "tecnico":    o.get("tecnico",     ""),
+                "supervisor": o.get("supervisor",  ""),
+                "zona":       o.get("zona",        ""),
+                "franja":     o.get("franja",      ""),
+                "estado":     o.get("estado",      ""),
+                "motivo":     o.get("motivo",      ""),
+            })
+
+        payload = _json.dumps({
+            "ordenes": ordenes,
+            "resumen": result.get("resumen", {}),
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            SHEETS_WEBAPP_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            sheets_resp = _json.loads(resp.read().decode("utf-8"))
+
+        logger.info(f"[SHEETS] Export OK — {len(ordenes)} órdenes enviadas")
+        return jsonify({
+            "status":        "ok",
+            "ordenes_env":   len(ordenes),
+            "sheets":        sheets_resp,
+        })
+
+    except Exception as e:
+        logger.exception("Error en /api/export-sheets")
+        return jsonify({"status": "error", "message": str(e)}), 500

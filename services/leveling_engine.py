@@ -409,10 +409,12 @@ def _generate_alerts(orders: list, idx: dict, now_dt) -> list:
         if tech == "SIN_ASIGNAR":
             continue
 
-        # ¿Ya tiene alguna orden marcada (en camino, en sitio, iniciado, etc.)?
-        any_in_progress = any(o.get("progress", 0) >= 1 for o in orders_list)
+        # ¿Tiene alguna orden ACTUALMENTE en progreso (no finalizada, no cancelada)?
+        # CRÍTICO: progress >= 6 = finalizada — no debe suprimir alertas de franjas posteriores
+        # Caso real: Ever finalizó a las 09:34 pero sus órdenes de 13:00 y 14:30 siguen sin marcar
+        any_in_progress = any(1 <= o.get("progress", 0) < 6 for o in orders_list)
         if any_in_progress:
-            continue  # Técnico ya está trabajando — no aplica
+            continue  # Técnico activamente en una orden — no aplica
 
         # Revisar cada franja en la que el técnico tiene órdenes
         for franja, total_in_franja in tech_franja.get(tech, {}).items():
@@ -468,8 +470,9 @@ def _generate_alerts(orders: list, idx: dict, now_dt) -> list:
         if tech == "SIN_ASIGNAR":
             continue
 
-        # Si ya tiene alguna marcación, no hay riesgo
-        any_in_progress = any(o.get("progress", 0) >= 1 for o in orders_list)
+        # Si tiene alguna orden activamente en progreso (no finalizada), no hay riesgo
+        # Excluir progress >= 6 para no suprimir alertas de franjas posteriores
+        any_in_progress = any(1 <= o.get("progress", 0) < 6 for o in orders_list)
         if any_in_progress:
             continue
 
@@ -613,13 +616,33 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
         elif dist_recv < 10.0:
             score += 150  # Aceptable: leve desvío
 
-    # ─── Bonus por zona: priorizar técnico de la misma zona que la orden ───
+    # ─── Bonus/penalización por zona ───
     recv_zone_main = idx["tech_main_zone"].get(receiver, "SIN_ZONA")
     order_zone_val = order.get("zona", "SIN_ZONA")
+    is_cross_zone  = (
+        recv_zone_main != order_zone_val
+        and order_zone_val not in ZONE_ADJACENCY.get(recv_zone_main, [])
+    )
+
     if recv_zone_main == order_zone_val:
         score += 1200  # Mismo técnico de zona: prioridad clara
     elif order_zone_val in ZONE_ADJACENCY.get(recv_zone_main, []):
         score += 350   # Zona adyacente: también viable
+    elif is_cross_zone:
+        # ─── Regla operativa: un técnico solo puede cambiar de zona UNA vez al día ───
+        # Si ya tiene órdenes pendientes en su zona, forzarle a ir a otra zona
+        # implica que debe regresar → doble desplazamiento → penalización fuerte.
+        # Solo se acepta como último recurso (si ningún otro técnico puede tomar la orden).
+        pending_in_own_zone = sum(
+            1 for o in idx["tech_orders"].get(receiver, [])
+            if o.get("zona") == recv_zone_main and o.get("movible")
+        )
+        if pending_in_own_zone > 0:
+            # Tiene ruta propia pendiente: cruzar zona lo obliga a volver
+            score -= 4000  # Penalización muy fuerte — último recurso
+        else:
+            # No tiene ruta pendiente en su zona: puede ir a otra zona sin doble viaje
+            score -= 800   # Penalización moderada por cambio de zona
 
     # Penalización por fragmentación de subzona del receptor
     recv_subzones = len(tech_subzones.get(receiver, set()))

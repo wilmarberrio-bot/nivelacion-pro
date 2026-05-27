@@ -562,21 +562,26 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
     if total_gap < MIN_IMBALANCE_TO_MOVE and donor not in ("SIN_ASIGNAR", None):
         return -9999.0
 
-    # ─── Score base: basado en desequilibrio de TOTALES ───
-    score = total_gap * 800
-
-    # Penalización si receptor ya está en el ideal o por encima
-    # (el coordinador decide igual — solo baja el score para que aparezca más abajo)
-    if sobrecarga_receptor:
-        score -= 1500  # Score bajo pero visible: el coordinador elige
-
-    # Bonus urgente si receptor está por debajo del mínimo ideal (< 4)
-    if recv_total < MIN_IDEAL_LOAD:
-        score += (MIN_IDEAL_LOAD - recv_total) * 600  # Prioridad alta
-
-    # Bonus si donante está sobrecargado (> 5)
-    if donor_total > MAX_IDEAL_LOAD:
-        score += (donor_total - MAX_IDEAL_LOAD) * 500
+    # ─── Score base: lógica separada según tipo de movimiento ───
+    if donor in ("SIN_ASIGNAR", None):
+        # Asignación de orden nueva (no hay desequilibrio que medir, solo capacidad + zona)
+        # Base plana positiva para que el bono de zona pueda decidir correctamente
+        score = 600
+        if recv_total < MIN_IDEAL_LOAD:
+            score += (MIN_IDEAL_LOAD - recv_total) * 500   # Prioridad a técnicos con déficit
+        elif recv_total < MAX_IDEAL_LOAD:
+            score += (MAX_IDEAL_LOAD - recv_total) * 200   # Bonus menor si tiene capacidad
+        if sobrecarga_receptor:
+            score -= 1200  # Penalizar si ya está en el ideal (visible pero baja prioridad)
+    else:
+        # Rebalanceo entre técnicos existentes
+        score = total_gap * 800
+        if sobrecarga_receptor:
+            score -= 1500
+        if recv_total < MIN_IDEAL_LOAD:
+            score += (MIN_IDEAL_LOAD - recv_total) * 600
+        if donor_total > MAX_IDEAL_LOAD:
+            score += (donor_total - MAX_IDEAL_LOAD) * 500
 
     # ─── Verificar capacidad de franja ───
     can_add, _ = _can_add_to_franja(receiver, order["franja"], tech_franja,
@@ -596,7 +601,25 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
 
     if dist_donor is not None and dist_recv is not None:
         savings = dist_donor - dist_recv
-        score += savings * 150
+        score += savings * 300  # Mayor peso al ahorro de distancia
+
+    # ─── Bono directo por proximidad física al técnico receptor ───
+    # Prioriza órdenes que caen dentro de la ruta actual del técnico
+    if dist_recv is not None:
+        if dist_recv < 2.0:
+            score += 900  # Misma cuadra / muy cercano: altísimo valor operativo
+        elif dist_recv < 5.0:
+            score += 500  # Cercano: mejora ruta sin desvío significativo
+        elif dist_recv < 10.0:
+            score += 150  # Aceptable: leve desvío
+
+    # ─── Bonus por zona: priorizar técnico de la misma zona que la orden ───
+    recv_zone_main = idx["tech_main_zone"].get(receiver, "SIN_ZONA")
+    order_zone_val = order.get("zona", "SIN_ZONA")
+    if recv_zone_main == order_zone_val:
+        score += 1200  # Mismo técnico de zona: prioridad clara
+    elif order_zone_val in ZONE_ADJACENCY.get(recv_zone_main, []):
+        score += 350   # Zona adyacente: también viable
 
     # Penalización por fragmentación de subzona del receptor
     recv_subzones = len(tech_subzones.get(receiver, set()))
@@ -618,6 +641,8 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
     tech_locs    = idx["tech_locs"]
 
     interzone_count = {}
+    sugs_por_receptor = {}   # evitar monopolio: max 3 sugerencias por técnico receptor
+    MAX_SUGS_RECEPTOR = 3
 
     for order in movable_orders:
         donor = order["tecnico"]
@@ -655,6 +680,8 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
                 continue
             if tech_total.get(receiver, 0) >= MAX_ABSOLUTE_LOAD:
                 continue
+            if sugs_por_receptor.get(receiver, 0) >= MAX_SUGS_RECEPTOR:
+                continue  # Ya acumuló suficientes sugerencias individuales
 
             score = _score_suggestion(order, donor, receiver, idx, current_hour)
             if score > best_score:
@@ -726,11 +753,145 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
             "total_donante":      donor_total_v,
             "dist_receptor_km":   round(dist_recv, 2) if dist_recv else None,
         })
+        sugs_por_receptor[best_receiver] = sugs_por_receptor.get(best_receiver, 0) + 1
 
     # Ordenar por score descendente
     suggestions.sort(key=lambda x: x["score"], reverse=True)
     return suggestions[:50]  # máximo 50 sugerencias
 
+
+
+# ─── Rutas completas para técnicos con capacidad ─────────────────────
+
+def _generate_route_suggestions(orders: list, idx: dict) -> list:
+    """
+    Para técnicos con capacidad (total < MIN_IDEAL_LOAD), agrupa las órdenes
+    disponibles de su zona en una propuesta de ruta completa.
+    En lugar de 5 sugerencias individuales para Wilson (1 orden),
+    devuelve UNA propuesta: "Wilson puede tomar esta ruta de 4 órdenes en SABANETA".
+    Solo incluye rutas que realmente mejoren la operación (calidad > cantidad).
+    """
+    rutas = []
+    tech_total     = idx["tech_total"]
+    tech_franja    = idx["tech_franja"]
+    tech_main_zone = idx["tech_main_zone"]
+
+    techs_con_capacidad = [
+        t for t in idx["tech_orders"]
+        if t != "SIN_ASIGNAR" and tech_total.get(t, 0) < MIN_IDEAL_LOAD
+    ]
+    if not techs_con_capacidad:
+        return rutas
+
+    # Órdenes candidatas: sin técnico O de técnicos sobrecargados
+    candidatas = [
+        o for o in orders
+        if o["movible"] and (
+            o["tecnico"] == "SIN_ASIGNAR"
+            or tech_total.get(o["tecnico"], 0) > MAX_IDEAL_LOAD
+        )
+    ]
+    if not candidatas:
+        return rutas
+
+    # Agrupar por zona
+    ordenes_por_zona: dict = {}
+    for o in candidatas:
+        ordenes_por_zona.setdefault(o.get("zona", "SIN_ZONA"), []).append(o)
+
+    vistas: set = set()
+
+    for tech in techs_con_capacidad:
+        cuota_actual = tech_total.get(tech, 0)
+        capacidad    = MAX_IDEAL_LOAD - cuota_actual
+        if capacidad <= 0:
+            continue
+
+        tech_zona = tech_main_zone.get(tech, "SIN_ZONA")
+        zonas_a_revisar = [tech_zona] + list(ZONE_ADJACENCY.get(tech_zona, []))
+
+        for zona in zonas_a_revisar:
+            if (tech, zona) in vistas:
+                continue
+            disponibles = ordenes_por_zona.get(zona, [])
+            if not disponibles:
+                continue
+
+            # Ordenar candidatas por proximidad al técnico (ruta más eficiente)
+            tech_orders_local = idx["tech_orders"]
+            tech_locs_local   = idx["tech_locs"]
+            tech_ref = _tech_reference_point(tech, tech_orders_local, tech_locs_local)
+            if tech_ref != (0.0, 0.0):
+                def dist_to_ref(o):
+                    if o.get("lat") and o.get("lon"):
+                        return haversine(o["lat"], o["lon"], tech_ref[0], tech_ref[1])
+                    return 999.0
+                disponibles = sorted(disponibles, key=dist_to_ref)
+
+            # Respetar límite de franja al armar la ruta
+            franjas_ocupadas = dict(tech_franja.get(tech, {}))
+            ordenes_validas  = []
+            for o in disponibles:
+                if len(ordenes_validas) >= capacidad:
+                    break
+                f = o.get("franja", "Sin Franja")
+                if f != "Sin Franja" and franjas_ocupadas.get(f, 0) >= MAX_ORDERS_PER_SLOT:
+                    continue
+                if f != "Sin Franja":
+                    franjas_ocupadas[f] = franjas_ocupadas.get(f, 0) + 1
+                ordenes_validas.append(o)
+
+            # Solo generar ruta si aporta al menos 2 órdenes (una sola no es "ruta")
+            if len(ordenes_validas) < 2:
+                continue
+
+            vistas.add((tech, zona))
+            es_zona_propia  = (zona == tech_zona)
+            cuota_propuesta = cuota_actual + len(ordenes_validas)
+            franjas_ruta    = sorted(set(o["franja"] for o in ordenes_validas if o["franja"] != "Sin Franja"))
+            tipos_ruta      = list(set(o.get("tipo", "") for o in ordenes_validas))
+
+            score_ruta = (
+                len(ordenes_validas) * 900
+                + (1200 if es_zona_propia else 350)
+                + (MIN_IDEAL_LOAD - cuota_actual) * 600
+            )
+
+            motivo = (
+                f"{tech} tiene {cuota_actual} orden(es) — puede completar cuota con "
+                f"{len(ordenes_validas)} orden(es) disponibles en {zona}"
+                f"{'  (su zona)' if es_zona_propia else ' (zona adyacente)'}. "
+                f"Propuesta: {cuota_actual}\u2192{cuota_propuesta} órdenes."
+            )
+
+            rutas.append({
+                "tipo_sugerencia":  "RUTA_COMPLETA",
+                "tecnico_sugerido": tech,
+                "zona":             zona,
+                "es_zona_propia":   es_zona_propia,
+                "ordenes":          [o["id"] for o in ordenes_validas],
+                "ordenes_detalle":  [
+                    {
+                        "id":             o["id"],
+                        "tipo":           o.get("tipo", ""),
+                        "franja":         o["franja"],
+                        "tecnico_actual": o["tecnico"],
+                        "estado":         o["estado"],
+                    }
+                    for o in ordenes_validas
+                ],
+                "total_ordenes":    len(ordenes_validas),
+                "cuota_actual":     cuota_actual,
+                "cuota_propuesta":  cuota_propuesta,
+                "franjas":          franjas_ruta,
+                "tipos":            tipos_ruta,
+                "motivo":           motivo,
+                "riesgo":           "bajo" if cuota_propuesta <= MAX_IDEAL_LOAD else "medio",
+                "score":            round(score_ruta, 1),
+            })
+
+    rutas.sort(key=lambda x: x["score"], reverse=True)
+    return rutas[:10]
 
 # ─── Punto de entrada principal ──────────────
 
@@ -758,8 +919,11 @@ def run_leveling(raw_orders: list) -> dict:
     # 4. Alertas
     alerts = _generate_alerts(orders, idx, now_dt)
 
-    # 5. Sugerencias
+    # 5. Sugerencias individuales
     suggestions = _generate_suggestions(orders, idx, now_hour)
+
+    # 5b. Rutas completas para técnicos con capacidad disponible
+    route_suggestions = _generate_route_suggestions(orders, idx)
 
     # 6. Carga por técnico
     carga_por_tecnico = []
@@ -859,6 +1023,7 @@ def run_leveling(raw_orders: list) -> dict:
             "alertas_riesgo_franja":  alertas_riesgo_franja,
             "tecnicos_sin_marcacion": techs_sin_marcacion,
             "sugerencias":            len(suggestions),
+            "rutas_sugeridas":         len(route_suggestions),
             "tecnicos_total":         len([t for t in idx["tech_orders"] if t != "SIN_ASIGNAR"]),
             "tecnicos_sobrecargados": techs_sobrecargados,
             "tecnicos_con_capacidad": techs_con_capacidad,
@@ -874,6 +1039,7 @@ def run_leveling(raw_orders: list) -> dict:
         "ordenes_bloqueadas":[enrich_order(o) for o in bloqueadas],
         "alertas":           alerts,
         "sugerencias":       suggestions,
+        "rutas_sugeridas":    route_suggestions,
     }
 
 
@@ -893,5 +1059,5 @@ def _empty_result(msg: str) -> dict:
         },
         "carga_por_tecnico": [], "carga_por_franja": [],
         "ordenes_movibles": [], "ordenes_bloqueadas": [],
-        "alertas": [], "sugerencias": [],
+        "alertas": [], "sugerencias": [], "rutas_sugeridas": [],
     }

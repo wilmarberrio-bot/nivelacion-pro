@@ -19,7 +19,7 @@ from config import (
 from services.normalization import (
     normalize_order, haversine, get_centroid, is_same_unit, order_has_coords,
     parse_franja_hours, get_status_progress, status_effective_weight,
-    status_completion_credit, norm_zone, is_movable, is_blocked, is_in_progress,
+    status_completion_credit, norm_zone, is_movable, is_blocked,
     norm_status,
 )
 

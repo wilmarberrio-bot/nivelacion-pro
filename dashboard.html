@@ -123,8 +123,10 @@ tr:hover td{background:var(--surface2)}
 .sug-score-mini{font-size:11px;color:var(--yellow);font-weight:600}
 .sug-mini-tipo{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .sug-mini-arrow{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;margin:2px 0}
-.sug-tech-from{color:var(--text2);background:var(--surface2);padding:2px 8px;border-radius:var(--radius);max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sug-tech-to{color:var(--green);background:var(--green-bg);padding:2px 8px;border-radius:var(--radius);max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sug-tech-from{color:var(--text2);background:var(--surface2);padding:3px 8px;border-radius:var(--radius);font-size:12px;word-break:break-word}
+.sug-tech-to{color:var(--green);background:var(--green-bg);padding:3px 8px;border-radius:var(--radius);font-size:12px;word-break:break-word}
+.excluido-pill{display:inline-flex;align-items:center;gap:5px;background:var(--red-bg);border:1px solid var(--red);border-radius:10px;padding:2px 8px;font-size:11px;color:var(--red)}
+.excluido-pill button{background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:0;line-height:1}
 .sug-mini-franja{font-size:11px;color:var(--text3)}
 .sug-mini-riesgo{font-size:11px;color:var(--text2)}
 .sug-mini-motivo{font-size:11px;color:var(--text3);font-style:italic;line-height:1.4}
@@ -226,9 +228,6 @@ tr:hover td{background:var(--surface2)}
   <div class="nav-item" onclick="showTab('sugerencias')" data-tab="sugerencias">
     <span class="nav-icon">💡</span> Sugerencias
     <span class="badge" id="nav-sug-count" style="display:none">0</span>
-  </div>
-  <div class="nav-item" onclick="showTab('excepciones')" data-tab="excepciones">
-    <span class="nav-icon">🚫</span> Excepciones
   </div>
   <div class="nav-item" onclick="showTab('informe')" data-tab="informe">
     <span class="nav-icon">📊</span> Informe Diario
@@ -352,6 +351,12 @@ tr:hover td{background:var(--surface2)}
         <option value="bajo">🟢 Riesgo bajo</option>
         <option value="alto">🔴 Riesgo alto</option>
       </select>
+      <select id="f-sug-excluir-select" style="max-width:200px">
+        <option value="">🚫 Excluir técnico...</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="excluirTecnicoSug()">+ Excluir</button>
+    </div>
+    <div id="excluidos-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:0"></div>
       <span style="margin-left:auto;font-size:12px;color:var(--text3)">
         Las acciones se registran en sesión. No modifican Metabase.
       </span>
@@ -800,6 +805,8 @@ function renderSugerencias(){
   if(estadoFilt!=='todas') sugs=sugs.filter(s=>s.sessionStatus===estadoFilt);
   if(zonaFilt) sugs=sugs.filter(s=>(s.zona||'').toUpperCase()===zonaFilt);
   if(riesgoFilt) sugs=sugs.filter(s=>s.riesgo===riesgoFilt);
+  // Filtro de exclusión local (no afecta el backend)
+  if(EXCLUIDOS_SUGS.size) sugs=sugs.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
 
   document.getElementById('sug-count').textContent=sugs.length;
   const list=document.getElementById('sugerencias-list');
@@ -887,6 +894,11 @@ function populateFilters(){
   const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
   fillSelect('filter-tech-zona', zonas);
   fillSelect('f-sug-zona',       zonas);
+  // Poblar dropdown de exclusión con todos los técnicos
+  const excSel = document.getElementById('f-sug-excluir-select');
+  if(excSel){
+    excSel.innerHTML=`<option value="">🚫 Excluir técnico...</option>`+techs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  }
   fillSelect('f-mov-tech',  techs);
   fillSelect('f-mov-franja', franjas);
   fillSelect('f-mov-tipo',   tipos);
@@ -899,7 +911,46 @@ function populateFilters(){
 // Data loads only when user uploads Excel — no auto Metabase call
 
 // ─────────────────────────────────────
-// EXCEPCIONES (Blacklist)
+// EXCLUIDOS EN SUGERENCIAS (filtro local de vista)
+// ─────────────────────────────────────
+const EXCLUIDOS_SUGS = new Set();
+
+function excluirTecnicoSug(){
+  const sel = document.getElementById('f-sug-excluir-select');
+  const nombre = sel.value;
+  if(!nombre) return;
+  EXCLUIDOS_SUGS.add(nombre);
+  sel.value='';
+  renderExcluidosPills();
+  renderSugerencias();
+}
+
+function quitarExcluidoSug(nombre){
+  EXCLUIDOS_SUGS.delete(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+}
+
+function renderExcluidosPills(){
+  const container = document.getElementById('excluidos-pills');
+  if(!container) return;
+  if(!EXCLUIDOS_SUGS.size){ container.innerHTML=''; return; }
+  container.innerHTML=[...EXCLUIDOS_SUGS].map(n=>
+    `<span class="excluido-pill">🚫 ${esc(n)} <button onclick="quitarExcluidoSug('${esc(n)}')" title="Quitar exclusión">×</button></span>`
+  ).join('');
+}
+
+// También llamar excluirTecnicoSug desde tarjetas
+async function excAddFromSug(nombre){
+  if(!nombre||nombre==='SIN ASIGNAR') return;
+  EXCLUIDOS_SUGS.add(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+  toast(`🚫 "${nombre}" ocultado de sugerencias (solo vista)`);
+}
+
+// ─────────────────────────────────────
+// EXCEPCIONES (Blacklist backend)
 // ─────────────────────────────────────
 async function excLoad(){
   try {

@@ -231,7 +231,7 @@ tr:hover td{background:var(--surface2)}
   <!-- Resumen -->
   <div class="tab-pane active" id="tab-resumen">
     <div class="cards-grid" id="cards-resumen">
-      <div class="loading"><div class="spinner"></div> Cargando...</div>
+      <div class="no-data"><div class="icon">📂</div><div>Sube tu Excel para comenzar</div><div style="font-size:12px;color:var(--text3);margin-top:4px">Usa el botón 📂 de la barra superior</div></div>
     </div>
     <div id="resumen-franjas"></div>
   </div>
@@ -248,14 +248,14 @@ tr:hover td{background:var(--surface2)}
       </select>
     </div>
     <div class="tech-grid" id="tech-grid">
-      <div class="loading"><div class="spinner"></div> Cargando...</div>
+      <div class="no-data"><div class="icon">📂</div><div>Sube tu Excel para comenzar</div><div style="font-size:12px;color:var(--text3);margin-top:4px">Usa el botón 📂 de la barra superior</div></div>
     </div>
   </div>
 
   <!-- Franjas -->
   <div class="tab-pane" id="tab-franjas">
     <div class="franja-grid" id="franja-grid">
-      <div class="loading"><div class="spinner"></div> Cargando...</div>
+      <div class="no-data"><div class="icon">📂</div><div>Sube tu Excel para comenzar</div><div style="font-size:12px;color:var(--text3);margin-top:4px">Usa el botón 📂 de la barra superior</div></div>
     </div>
     <div class="section-title">Detalle por franja y técnico</div>
     <div class="table-wrap" id="franja-table-wrap">
@@ -414,12 +414,30 @@ async function loadData(){
   try {
     const res = await api('/api/nivelacion');
     DATA = res;
+    if(!DATA.resumen || DATA.resumen.total_ordenes === 0){
+      const msg = '<div class="no-data"><div class="icon">📂</div><div>Sin órdenes — sube tu Excel</div><div style="font-size:12px;color:var(--text3);margin-top:4px">Usa el botón 📂 de la barra superior</div></div>';
+      document.getElementById('cards-resumen').innerHTML = msg;
+      document.getElementById('tech-grid').innerHTML = msg;
+      document.getElementById('franja-grid').innerHTML = msg;
+      document.getElementById('resumen-franjas').innerHTML = '';
+      return;
+    }
     renderAll();
     document.getElementById('last-update').textContent = 'Actualizado: ' + (DATA.generado_en||'—');
     toast('Datos cargados ✓');
   } catch(e){
     toast('Error: '+e.message, 'error');
-    document.getElementById('cards-resumen').innerHTML = `<div class="no-data"><div class="icon">⚠️</div><div>${esc(e.message)}</div><div style="font-size:12px;margin-top:6px">Configura METABASE_URL o sube un Excel con el botón 📂</div></div>`;
+    const errMsg = `<div class="no-data"><div class="icon">⚠️</div><div>${esc(e.message)}</div><div style="font-size:12px;margin-top:6px">Configura METABASE_URL o sube un Excel con el botón 📂</div></div>`;
+    document.getElementById('cards-resumen').innerHTML = errMsg;
+    document.getElementById('tech-grid').innerHTML = errMsg;
+    document.getElementById('franja-grid').innerHTML = errMsg;
+    document.getElementById('resumen-franjas').innerHTML = '';
+    document.getElementById('movibles-tbody').innerHTML = '<tr class="empty-row"><td colspan="8">Sin datos — sube un Excel</td></tr>';
+    document.getElementById('bloqueadas-tbody').innerHTML = '<tr class="empty-row"><td colspan="8">Sin datos — sube un Excel</td></tr>';
+    const alertasList = document.getElementById('alertas-list');
+    if(alertasList) alertasList.innerHTML = '<div class="no-data"><div class="icon">🔔</div><div>Sin alertas</div></div>';
+    const sugList = document.getElementById('sugerencias-list');
+    if(sugList) sugList.innerHTML = '<div class="no-data"><div class="icon">💡</div><div>Sin sugerencias</div></div>';
   }
 }
 
@@ -788,4 +806,17 @@ function populateFilters(){
     el.innerHTML=`<option value="">${el.options[0]?.text||'Todos'}</option>`+vals.map(v=>`<option value="${esc(v)}" ${v===prev?'selected':''}>${esc(v)}</option>`).join('');
     el.value=prev;
   };
-  fillSelect
+  fillSelect('f-mov-tech',  techs);
+  fillSelect('f-mov-franja', franjas);
+  fillSelect('f-mov-tipo',   tipos);
+  fillSelect('f-blq-tech',   techs);
+  fillSelect('f-blq-estado', estados);
+  fillSelect('f-alert-tipo', alertTipos);
+}
+
+// ── Auto-load on page open ──
+// Data loads only when user uploads Excel — no auto Metabase call
+
+</script>
+</body>
+</html>

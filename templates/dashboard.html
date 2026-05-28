@@ -1000,7 +1000,143 @@ function populateFilters(){
   fillSelect('f-alert-tipo', alertTipos);
 }
 
-// ── Auto-load on page open ──
-// Data loads only when user uploads Excel — no auto Metabase call
+// ─── EXCLUIDOS EN SUGERENCIAS (filtro local de vista) ───────────────────────
+const EXCLUIDOS_SUGS = new Set();
 
-// ───────────────────────────�
+function excluirTecnicoSug(){
+  const sel = document.getElementById('f-sug-excluir-select');
+  if(!sel||!sel.value) return;
+  const nombre = sel.value;
+  EXCLUIDOS_SUGS.add(nombre);
+  sel.value='';
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+}
+
+function quitarExcluidoSug(nombre){
+  EXCLUIDOS_SUGS.delete(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+}
+
+function renderExcluidosPills(){
+  const container = document.getElementById('excluidos-pills');
+  if(!container) return;
+  if(!EXCLUIDOS_SUGS.size){ container.innerHTML=''; return; }
+  container.innerHTML=[...EXCLUIDOS_SUGS].map(n=>
+    `<span class="excluido-pill">🚫 ${esc(n)} <button onclick="quitarExcluidoSug('${esc(n)}')" title="Quitar">x</button></span>`
+  ).join('');
+}
+
+function excAddFromSug(nombre){
+  if(!nombre) return;
+  EXCLUIDOS_SUGS.add(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+  toast(`🚫 "${nombre}" excluido de sugerencias`);
+}
+
+// ─── Lista negra / Excepciones ───────────────────────────────────────────────
+async function excAdd(){
+  const input = document.getElementById('exc-input');
+  const nombre = (input?.value||'').trim();
+  if(!nombre){ toast('Escribe el nombre del tecnico','error'); return; }
+  try {
+    await api('/api/blacklist/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
+    input.value='';
+    toast(`🚫 "${nombre}" agregado a excepciones`);
+    const data = await api('/api/blacklist');
+    renderExcList(data.blacklist||[]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+async function excClear(){
+  if(!confirm('Limpiar todas las excepciones?')) return;
+  try {
+    await api('/api/blacklist/clear', {method:'POST'});
+    toast('Lista de excepciones limpiada');
+    renderExcList([]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+function renderExcList(list){
+  const el = document.getElementById('exc-list');
+  document.getElementById('exc-count').textContent = list.length;
+  if(!list.length){
+    el.innerHTML='<div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>';
+    return;
+  }
+  el.innerHTML = list.map(n=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
+      <span>🚫 ${esc(n)}</span>
+      <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="excRemove('${esc(n)}')">Quitar</button>
+    </div>`).join('');
+}
+
+async function excRemove(nombre){
+  try {
+    await api('/api/blacklist/remove', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
+    toast(`"${nombre}" quitado de excepciones`);
+    const data = await api('/api/blacklist');
+    renderExcList(data.blacklist||[]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+// ─── Informe Diario / Exportar a Google Sheets ───────────────────────────────
+const EXPORT_LOG = [];
+
+async function exportarASheets(){
+  if(!DATA||!DATA.resumen||DATA.resumen.total_ordenes===0){
+    toast('Sube primero el Excel para exportar','error'); return;
+  }
+  const btns = ['sheets-btn','sheets-btn2'].map(id=>document.getElementById(id)).filter(Boolean);
+  const statuses = ['sheets-status','sheets-status2'].map(id=>document.getElementById(id)).filter(Boolean);
+  btns.forEach(b=>b.disabled=true);
+  statuses.forEach(s=>s.textContent='Exportando...');
+  try {
+    await api('/api/export-sheets', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({data: DATA})
+    });
+    const now = new Date().toLocaleTimeString('es-CO');
+    EXPORT_LOG.unshift({hora:now, ordenes:DATA.resumen.total_ordenes, status:'OK'});
+    statuses.forEach(s=>s.textContent='Exportado a las '+now);
+    toast('Datos exportados a Google Sheets');
+    informeLoad();
+  } catch(e){
+    const now = new Date().toLocaleTimeString('es-CO');
+    EXPORT_LOG.unshift({hora:now, ordenes:0, status:'Error: '+e.message});
+    statuses.forEach(s=>s.textContent='Error: '+e.message);
+    toast('Error al exportar: '+e.message,'error');
+  } finally {
+    btns.forEach(b=>b.disabled=false);
+  }
+}
+
+function informeLoad(){
+  const list = document.getElementById('informe-list');
+  if(!list) return;
+  document.getElementById('informe-count').textContent = EXPORT_LOG.length;
+  if(!EXPORT_LOG.length){
+    list.innerHTML='<div class="no-data"><div class="icon">📊</div><div>Sin exportaciones — sube el Excel y presiona Exportar a Sheets</div></div>';
+    return;
+  }
+  list.innerHTML = EXPORT_LOG.map(e=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
+      <span style="font-size:18px">${e.status==='OK'?'OK':'ERR'}</span>
+      <div>
+        <div style="font-weight:600;font-size:13px">${e.status==='OK'?e.ordenes+' ordenes exportadas':esc(e.status)}</div>
+        <div style="font-size:11px;color:var(--text3)">Exportado a las ${e.hora}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ─── Sin autoload — usuario sube Excel manualmente ───────────────────────────
+
+</script>
+</body>
+</html>

@@ -895,15 +895,20 @@ function renderIntercambios(){
   }
   header.style.display = '';
 
-  // Agrupar por franja
-  const byFranja = {};
-  list_data.forEach(s=>{ const f=s.franja_actual||'Sin Franja'; if(!byFranja[f]) byFranja[f]=[]; byFranja[f].push(s); });
+  // Agrupar por zona (igual que sugerencias individuales)
+  const byZona = {};
+  list_data.forEach(s=>{
+    const z = s.zona||s.zona_b||'SIN_ZONA';
+    if(!byZona[z]) byZona[z]=[];
+    byZona[z].push(s);
+  });
 
   let html = '';
-  Object.keys(byFranja).sort().forEach(franja=>{
-    const items = byFranja[franja];
-    html += `<div style="font-size:12px;font-weight:600;color:var(--text3);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.5px">⏰ ${esc(franja)} — ${items.length} intercambio${items.length!==1?'s':''}</div>
-    <div class="sug-grid">`;
+  Object.keys(byZona).sort().forEach(zona=>{
+    const items = byZona[zona];
+    html += `<div class="section-title" style="margin-top:16px;margin-bottom:8px">
+      📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${items.length} intercambio${items.length!==1?'s':''}</span>
+    </div><div class="sug-grid">`;
     items.forEach(s=>{
       const key = 'INT_'+s.orden+'_'+s.orden_b;
       const isApplied = !!SESSION.applied[key];
@@ -1135,7 +1140,8 @@ function informeLoad(){
     </div>`).join('');
 }
 
-// ─── Sin autoload — usuario sube Excel manualmente ───────────────────────────
+
+// Sin autoload — usuario sube Excel manualmente
 
 </script>
 </body>

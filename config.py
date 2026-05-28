@@ -43,6 +43,7 @@ MOVABLE_STATUSES = [
     "por programar",
     "programado",
     "programada",
+    "inbound",
 ]
 
 BLOCKED_STATUSES = [

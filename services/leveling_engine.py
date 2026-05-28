@@ -937,6 +937,142 @@ def _generate_route_suggestions(orders: list, idx: dict) -> list:
     rutas.sort(key=lambda x: x["score"], reverse=True)
     return rutas[:10]
 
+
+
+# ─── Sugerencias de intercambio bidireccional ─────────────────────────────────
+
+def _generate_swap_suggestions(orders: list, idx: dict) -> list:
+    """
+    Genera intercambios A↔B: técnico A cede orden X a técnico B,
+    y técnico B cede orden Y a técnico A — en la MISMA franja.
+    No altera capacidad de franja. Beneficios posibles:
+    - Mejor alineación de zona (cada orden queda con técnico de su zona)
+    - Reducción de desplazamientos totales
+    - Menor fragmentación de subzonas
+    Solo se sugiere si el beneficio neto supera el umbral mínimo.
+    """
+    tech_orders    = idx["tech_orders"]
+    tech_locs      = idx["tech_locs"]
+    tech_main_zone = idx["tech_main_zone"]
+    tech_subzones  = idx["tech_subzones"]
+
+    techs = [t for t in tech_orders if t != "SIN_ASIGNAR"]
+
+    movable_by_tech: dict = {}
+    for t in techs:
+        movable_by_tech[t] = [
+            o for o in tech_orders.get(t, [])
+            if o["movible"] and o.get("franja", "Sin Franja") != "Sin Franja"
+        ]
+
+    swaps = []
+    seen_pairs: set = set()
+
+    for i, tech_a in enumerate(techs):
+        orders_a = movable_by_tech.get(tech_a, [])
+        if not orders_a:
+            continue
+        zone_a = tech_main_zone.get(tech_a, "SIN_ZONA")
+
+        for tech_b in techs[i + 1:]:
+            orders_b = movable_by_tech.get(tech_b, [])
+            if not orders_b:
+                continue
+            zone_b = tech_main_zone.get(tech_b, "SIN_ZONA")
+
+            b_by_franja: dict = {}
+            for o in orders_b:
+                b_by_franja.setdefault(o["franja"], []).append(o)
+
+            for order_x in orders_a:
+                franja = order_x["franja"]
+                candidates_y = b_by_franja.get(franja, [])
+                if not candidates_y:
+                    continue
+                zone_x = order_x.get("zona", "SIN_ZONA")
+
+                for order_y in candidates_y:
+                    pair_key = (
+                        min(str(order_x["id"]), str(order_y["id"])),
+                        max(str(order_x["id"]), str(order_y["id"])),
+                    )
+                    if pair_key in seen_pairs:
+                        continue
+
+                    zone_y = order_y.get("zona", "SIN_ZONA")
+
+                    align_before = int(zone_x == zone_a) + int(zone_y == zone_b)
+                    align_after  = int(zone_x == zone_b) + int(zone_y == zone_a)
+                    zone_delta   = align_after - align_before
+
+                    subs_a = tech_subzones.get(tech_a, set())
+                    subs_b = tech_subzones.get(tech_b, set())
+                    subs_a_after = (subs_a - {order_x["subzona"]}) | {order_y["subzona"]}
+                    subs_b_after = (subs_b - {order_y["subzona"]}) | {order_x["subzona"]}
+                    subz_delta   = (len(subs_a) + len(subs_b)) - (len(subs_a_after) + len(subs_b_after))
+
+                    dist_xa = _dist_to_tech(order_x, tech_a, tech_orders, tech_locs)
+                    dist_yb = _dist_to_tech(order_y, tech_b, tech_orders, tech_locs)
+                    dist_xb = _dist_to_tech(order_x, tech_b, tech_orders, tech_locs)
+                    dist_ya = _dist_to_tech(order_y, tech_a, tech_orders, tech_locs)
+
+                    has_coords = all(d is not None for d in [dist_xa, dist_yb, dist_xb, dist_ya])
+                    dist_saving = 0.0
+                    if has_coords:
+                        dist_saving = (dist_xa + dist_yb) - (dist_xb + dist_ya)
+
+                    score = zone_delta * 900 + subz_delta * 300 + dist_saving * 250
+                    if score <= 50:
+                        continue
+
+                    seen_pairs.add(pair_key)
+
+                    beneficio_parts = []
+                    if zone_delta > 0:
+                        beneficio_parts.append(
+                            f"Cada orden queda con el técnico de su zona (+{zone_delta})"
+                        )
+                    if subz_delta > 0:
+                        beneficio_parts.append(f"Reduce fragmentación ({subz_delta} subzona(s) menos)")
+                    if has_coords and dist_saving > 0.5:
+                        beneficio_parts.append(f"Ahorro ~{dist_saving:.1f}km")
+
+                    motivo = (
+                        f"Intercambio: {tech_a} ↔ {tech_b} | "
+                        f"Orden {order_x['id']} (zona {zone_x}) ↔ Orden {order_y['id']} (zona {zone_y}) "
+                        f"en franja {franja}"
+                    )
+                    riesgo = "bajo" if zone_delta >= 2 else ("medio" if zone_delta >= 1 else "alto")
+
+                    swaps.append({
+                        "tipo_sugerencia":    "INTERCAMBIO",
+                        "orden":              order_x["id"],
+                        "orden_b":            order_y["id"],
+                        "tecnico_actual":     tech_a,
+                        "tecnico_sugerido":   tech_b,
+                        "tecnico_b_actual":   tech_b,
+                        "tecnico_b_sugerido": tech_a,
+                        "franja_actual":      franja,
+                        "franja_sugerida":    franja,
+                        "zona":               zone_x,
+                        "zona_b":             zone_y,
+                        "tipo":               order_x.get("tipo", ""),
+                        "estado":             order_x["estado"],
+                        "riesgo":             riesgo,
+                        "motivo":             motivo,
+                        "beneficio":          " / ".join(beneficio_parts) if beneficio_parts
+                                              else "Mejora distribución geográfica",
+                        "score":              round(score, 1),
+                        "zone_delta":         zone_delta,
+                        "dist_saving_km":     round(dist_saving, 2) if has_coords else None,
+                        "interzona":          False,
+                        "aviso_sobrecarga":   False,
+                    })
+
+    swaps.sort(key=lambda x: x["score"], reverse=True)
+    return swaps[:20]
+
+
 # ─── Punto de entrada principal ──────────────
 
 def run_leveling(raw_orders: list) -> dict:
@@ -968,6 +1104,9 @@ def run_leveling(raw_orders: list) -> dict:
 
     # 5b. Rutas completas para técnicos con capacidad disponible
     route_suggestions = _generate_route_suggestions(orders, idx)
+
+    # 5c. Intercambios bidireccionales (A↔B misma franja)
+    swap_suggestions = _generate_swap_suggestions(orders, idx)
 
     # 6. Carga por técnico
     carga_por_tecnico = []
@@ -1067,6 +1206,7 @@ def run_leveling(raw_orders: list) -> dict:
             "alertas_riesgo_franja":  alertas_riesgo_franja,
             "tecnicos_sin_marcacion": techs_sin_marcacion,
             "sugerencias":            len(suggestions),
+            "intercambios":           len(swap_suggestions),
             "rutas_sugeridas":         len(route_suggestions),
             "tecnicos_total":         len([t for t in idx["tech_orders"] if t != "SIN_ASIGNAR"]),
             "tecnicos_sobrecargados": techs_sobrecargados,
@@ -1083,6 +1223,7 @@ def run_leveling(raw_orders: list) -> dict:
         "ordenes_bloqueadas":[enrich_order(o) for o in bloqueadas],
         "alertas":           alerts,
         "sugerencias":       suggestions,
+        "intercambios":      swap_suggestions,
         "rutas_sugeridas":    route_suggestions,
     }
 
@@ -1093,7 +1234,7 @@ def _empty_result(msg: str) -> dict:
         "mensaje":     msg,
         "resumen": {
             "total_ordenes": 0, "movibles": 0, "bloqueadas": 0,
-            "alertas": 0, "alertas_criticas": 0, "sugerencias": 0,
+            "alertas": 0, "alertas_criticas": 0, "sugerencias": 0, "intercambios": 0,
             "alertas_muy_altas": 0, "alertas_riesgo_franja": 0,
             "tecnicos_sin_marcacion": 0,
             "tecnicos_total": 0, "tecnicos_sobrecargados": 0,
@@ -1103,5 +1244,5 @@ def _empty_result(msg: str) -> dict:
         },
         "carga_por_tecnico": [], "carga_por_franja": [],
         "ordenes_movibles": [], "ordenes_bloqueadas": [],
-        "alertas": [], "sugerencias": [], "rutas_sugeridas": [],
+        "alertas": [], "sugerencias": [], "intercambios": [], "rutas_sugeridas": [],
     }

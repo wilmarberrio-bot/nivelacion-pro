@@ -111,21 +111,31 @@ tr:hover td{background:var(--surface2)}
 .alert-alta .alert-badge{background:var(--orange);color:#000}
 .alert-media .alert-badge{background:var(--yellow);color:#000}
 
-/* ── Sugerencias ── */
-.suggestion-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:10px;transition:.15s}
-.suggestion-card:hover{border-color:var(--blue)}
-.suggestion-card.aplicada{opacity:.5;border-color:var(--green)}
-.suggestion-card.descartada{opacity:.4;border-color:var(--border)}
-.sug-header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.sug-orden{font-weight:700;font-size:14px;color:var(--text)}
-.sug-score{margin-left:auto;font-size:12px;color:var(--text3)}
-.sug-score strong{color:var(--blue)}
-.sug-arrow{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:6px}
-.sug-arrow .tech{background:var(--surface2);padding:3px 10px;border-radius:var(--radius);font-weight:500}
-.sug-arrow .tech.receptor{color:var(--green)}
-.sug-arrow .arrow-icon{color:var(--text3)}
-.sug-meta{display:flex;gap:12px;font-size:12px;color:var(--text2);margin-bottom:8px;flex-wrap:wrap}
-.sug-meta span{display:flex;align-items:center;gap:3px}
+/* ── Sugerencias grid de tarjetas ── */
+.sug-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:12px}
+.sug-mini-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
+.sug-mini-card:hover{border-color:var(--blue)}
+.sug-mini-card.aplicada{border-color:var(--green);opacity:.7}
+.sug-mini-card.descartada{opacity:.4;filter:grayscale(.5)}
+.sug-mini-card.riesgo-alto{border-color:var(--red)}
+.sug-mini-card.intercambio{border-color:var(--blue);border-style:dashed}
+.sug-mini-card.intercambio:hover{border-color:var(--blue);border-style:solid}
+.swap-badge{display:inline-flex;align-items:center;gap:3px;background:#e8f0fe;color:var(--blue);border:1px solid var(--blue);border-radius:8px;padding:1px 7px;font-size:10px;font-weight:700}
+.sug-tech-swap{color:var(--blue);background:#e8f0fe;padding:3px 8px;border-radius:var(--radius);font-size:12px;word-break:break-word}
+.sug-mini-top{display:flex;justify-content:space-between;align-items:center}
+.sug-orden-mini{font-size:13px;font-weight:700;color:var(--text)}
+.sug-score-mini{font-size:11px;color:var(--yellow);font-weight:600}
+.sug-mini-tipo{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.sug-mini-arrow{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;margin:2px 0}
+.sug-tech-from{color:var(--text2);background:var(--surface2);padding:3px 8px;border-radius:var(--radius);font-size:12px;word-break:break-word}
+.sug-tech-to{color:var(--green);background:var(--green-bg);padding:3px 8px;border-radius:var(--radius);font-size:12px;word-break:break-word}
+.excluido-pill{display:inline-flex;align-items:center;gap:5px;background:var(--red-bg);border:1px solid var(--red);border-radius:10px;padding:2px 8px;font-size:11px;color:var(--red)}
+.excluido-pill button{background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:0;line-height:1}
+.sug-mini-franja{font-size:11px;color:var(--text3)}
+.sug-mini-riesgo{font-size:11px;color:var(--text2)}
+.sug-mini-motivo{font-size:11px;color:var(--text3);font-style:italic;line-height:1.4}
+.sug-mini-actions{display:flex;gap:4px;margin-top:2px;flex-wrap:wrap}
+.sug-mini-actions .btn-sm{padding:3px 10px;font-size:12px}
 .sug-motivo{font-size:12px;color:var(--text2);margin-bottom:8px;padding:6px 10px;background:var(--surface2);border-radius:var(--radius)}
 .sug-actions{display:flex;gap:8px}
 .riesgo-alto{color:var(--red)}
@@ -174,26 +184,6 @@ tr:hover td{background:var(--surface2)}
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;background:var(--surface2);color:var(--text2)}
 .no-data{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;color:var(--text3);gap:8px}
 .no-data .icon{font-size:36px;opacity:.4}
-
-/* ── Suggestion Mini-Cards Grid ── */
-.sug-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px}
-.sug-mini-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;transition:border-color .2s}
-.sug-mini-card:hover{border-color:var(--blue)}
-.sug-mini-card.aplicada{border-color:var(--green);opacity:.75}
-.sug-mini-card.descartada{opacity:.45;filter:grayscale(.5)}
-.sug-mini-card.riesgo-alto{border-color:var(--red)}
-.sug-mini-top{display:flex;justify-content:space-between;align-items:center}
-.sug-orden-mini{font-size:12px;font-weight:700;color:var(--text1)}
-.sug-score-mini{font-size:11px;color:var(--yellow);font-weight:600}
-.sug-mini-tipo{display:flex;gap:4px;flex-wrap:wrap}
-.sug-mini-arrow{display:flex;align-items:center;font-size:12px;font-weight:600;gap:2px}
-.sug-tech-from{color:var(--text2);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sug-tech-to{color:var(--green);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sug-mini-franja{font-size:11px;color:var(--text3)}
-.sug-mini-riesgo{font-size:11px;color:var(--text2)}
-.sug-mini-motivo{font-size:11px;color:var(--text3);font-style:italic;line-height:1.3}
-.sug-mini-actions{display:flex;gap:4px;margin-top:2px}
-.sug-mini-actions .btn-sm{padding:2px 8px;font-size:11px}
 </style>
 </head>
 <body>
@@ -241,13 +231,10 @@ tr:hover td{background:var(--surface2)}
   </div>
   <div class="nav-item" onclick="showTab('sugerencias')" data-tab="sugerencias">
     <span class="nav-icon">💡</span> Sugerencias
-  </div>
-  <div class="nav-item" onclick="showTab('excepciones')" data-tab="excepciones">
-    <span class="nav-icon">🚫</span> Excepciones
+    <span class="badge" id="nav-sug-count" style="display:none">0</span>
   </div>
   <div class="nav-item" onclick="showTab('informe')" data-tab="informe">
-    <span class="nav-icon">📸</span> Informe Diario
-    <span class="badge" id="nav-sug-count" style="display:none">0</span>
+    <span class="nav-icon">📊</span> Informe Diario
   </div>
 </div>
 
@@ -354,13 +341,13 @@ tr:hover td{background:var(--surface2)}
   <!-- Sugerencias -->
   <div class="tab-pane" id="tab-sugerencias">
     <div class="filters">
-      <select id="f-sug-estado" onchange="renderSugerencias()">
+      <select id="f-sug-estado" onchange="renderSugerencias();renderIntercambios()">
         <option value="pendiente">Pendientes</option>
         <option value="aplicada">Aplicadas</option>
         <option value="descartada">Descartadas</option>
         <option value="todas">Todas</option>
       </select>
-      <select id="f-sug-zona" onchange="renderSugerencias()">
+      <select id="f-sug-zona" onchange="renderSugerencias();renderIntercambios()">
         <option value="">Todas las zonas</option>
       </select>
       <select id="f-sug-riesgo" onchange="renderSugerencias()">
@@ -368,6 +355,12 @@ tr:hover td{background:var(--surface2)}
         <option value="bajo">🟢 Riesgo bajo</option>
         <option value="alto">🔴 Riesgo alto</option>
       </select>
+      <select id="f-sug-excluir-select" style="max-width:200px">
+        <option value="">🚫 Excluir técnico...</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="excluirTecnicoSug()">+ Excluir</button>
+    </div>
+    <div id="excluidos-pills" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:0"></div>
       <span style="margin-left:auto;font-size:12px;color:var(--text3)">
         Las acciones se registran en sesión. No modifican Metabase.
       </span>
@@ -376,38 +369,42 @@ tr:hover td{background:var(--surface2)}
       Sugerencias de nivelación <span class="count" id="sug-count">0</span>
     </div>
     <div id="sugerencias-list"></div>
+    <div class="section-title" style="margin-top:20px" id="intercambios-header">
+      🔄 Intercambios sugeridos (A↔B) <span class="count" id="int-count">0</span>
+      <span style="font-size:11px;font-weight:400;color:var(--text3);margin-left:6px">Misma franja · sin cambio de carga · mejor alineación de zona</span>
+    </div>
+    <div id="intercambios-list"></div>
   </div>
 
   <!-- Excepciones / Lista Negra -->
   <div class="tab-pane" id="tab-excepciones">
     <div class="filters">
-      <input type="text" id="exc-input" placeholder="Nombre del técnico a excluir..." style="width:260px">
+      <input type="text" id="exc-input" placeholder="Nombre completo del técnico a excluir..." style="width:300px">
       <button class="btn btn-red" onclick="excAdd()">🚫 Agregar excepción</button>
       <button class="btn btn-ghost" onclick="excClear()" style="margin-left:auto">🗑 Limpiar todo</button>
     </div>
-    <div class="section-title">Técnicos excluidos de sugerencias <span class="count" id="exc-count">0</span></div>
-    <div id="exc-list" style="padding:8px 0">
-      <div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+      Los técnicos en esta lista <strong>no recibirán sugerencias</strong> de reasignación. También puedes excluir directamente desde las tarjetas de Sugerencias con el botón 🚫.
     </div>
-    <div style="font-size:12px;color:var(--text3);padding:12px 0;margin-top:8px;border-top:1px solid var(--border)">
-      ⚠ Los técnicos en esta lista no recibirán sugerencias de reasignación.<br>
-      Las excepciones se mantienen mientras el servidor esté activo.
+    <div class="section-title">Técnicos excluidos <span class="count" id="exc-count">0</span></div>
+    <div id="exc-list">
+      <div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>
     </div>
   </div>
 
-  <!-- Informe Diario -->
+  <!-- Informe Diario (Google Sheets) -->
   <div class="tab-pane" id="tab-informe">
     <div class="filters">
-      <button class="btn btn-sheets" id="sheets-btn" onclick="exportarASheets()">📊 Exportar a Sheets</button>
-      <span style="font-size:12px;color:var(--text3);margin-left:8px" id="sheets-status"></span>
+      <button class="btn btn-sheets" id="sheets-btn2" onclick="exportarASheets()">📊 Exportar a Sheets ahora</button>
+      <span style="font-size:12px;color:var(--text3);margin-left:8px" id="sheets-status2"></span>
     </div>
-    <div style="padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:12px;font-size:13px;color:var(--text2)">
-      Cada vez que presiones <strong>Exportar a Sheets</strong>, el estado actual de todas las órdenes se envía al Google Sheets del informe diario.<br>
-      El primer envío del día establece el <strong>baseline</strong>. Los siguientes permiten comparar cancelaciones, reprogramaciones y órdenes nuevas.
+    <div style="font-size:13px;color:var(--text2);padding:10px 0 14px;border-bottom:1px solid var(--border);margin-bottom:14px">
+      Cada exportación envía el estado actual de todas las órdenes al Google Sheets.<br>
+      El <strong>primer envío del día</strong> establece el baseline. Los siguientes permiten ver cancelaciones, reprogramaciones y órdenes nuevas vs el inicio del día.
     </div>
-    <div class="section-title">Historial de exportaciones de esta sesión <span class="count" id="informe-count">0</span></div>
+    <div class="section-title">Historial de exportaciones <span class="count" id="informe-count">0</span></div>
     <div id="informe-list">
-      <div class="no-data"><div class="icon">📊</div><div>Sin exportaciones aún — sube el Excel y presiona "Exportar a Sheets"</div></div>
+      <div class="no-data"><div class="icon">📊</div><div>Sin exportaciones — sube el Excel y presiona "Exportar a Sheets"</div></div>
     </div>
   </div>
 
@@ -454,7 +451,7 @@ function showTab(name){
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   document.querySelector(`[data-tab="${name}"]`).classList.add('active');
-  if(name==='sugerencias') renderSugerencias();
+  if(name==='sugerencias'){ renderSugerencias(); renderIntercambios(); }
   if(name==='alertas') renderAlertas();
   if(name==='excepciones') excLoad();
   if(name==='informe') informeLoad();
@@ -545,6 +542,7 @@ function renderAll(){
   renderBloqueadas();
   renderAlertas();
   renderSugerencias();
+  renderIntercambios();
   populateFilters();
   updateNavBadges();
 }
@@ -553,12 +551,14 @@ function updateNavBadges(){
   if(!DATA) return;
   const alertas = DATA.alertas||[];
   const sug = DATA.sugerencias||[];
+  const intercambios = DATA.intercambios||[];
   const alertCritical = alertas.filter(a=>['critica','alta'].includes(a.severidad)).length;
   const alertBadge = document.getElementById('nav-alert-count');
   if(alertCritical>0){ alertBadge.textContent=alertCritical; alertBadge.style.display=''; }
   else alertBadge.style.display='none';
   const sugBadge = document.getElementById('nav-sug-count');
-  if(sug.length>0){ sugBadge.textContent=sug.length; sugBadge.style.display=''; }
+  const totalSug = sug.length + intercambios.length;
+  if(totalSug>0){ sugBadge.textContent=totalSug; sugBadge.style.display=''; }
   else sugBadge.style.display='none';
 }
 
@@ -813,21 +813,16 @@ function renderSugerencias(){
   const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
   const riesgoFilt = document.getElementById('f-sug-riesgo').value;
 
-  sugs = sugs.map(s=>({
-    ...s,
-    sessionStatus: SESSION.applied[s.orden]?'aplicada': SESSION.dismissed[s.orden]?'descartada':'pendiente'
-  }));
-
+  sugs = sugs.map(s=>({...s, sessionStatus: SESSION.applied[s.orden]?'aplicada': SESSION.dismissed[s.orden]?'descartada':'pendiente'}));
   if(estadoFilt!=='todas') sugs=sugs.filter(s=>s.sessionStatus===estadoFilt);
   if(zonaFilt) sugs=sugs.filter(s=>(s.zona||'').toUpperCase()===zonaFilt);
   if(riesgoFilt) sugs=sugs.filter(s=>s.riesgo===riesgoFilt);
+  // Filtro de exclusión local (no afecta el backend)
+  if(EXCLUIDOS_SUGS.size) sugs=sugs.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
 
   document.getElementById('sug-count').textContent=sugs.length;
   const list=document.getElementById('sugerencias-list');
-  if(!sugs.length){
-    list.innerHTML=`<div class="no-data"><div class="icon">💡</div><div>Sin sugerencias ${estadoFilt==='pendiente'?'pendientes':estadoFilt}</div></div>`;
-    return;
-  }
+  if(!sugs.length){ list.innerHTML=`<div class="no-data"><div class="icon">💡</div><div>Sin sugerencias ${estadoFilt==='pendiente'?'pendientes':estadoFilt}</div></div>`; return; }
 
   // Agrupar por zona
   const byZona={};
@@ -835,44 +830,127 @@ function renderSugerencias(){
 
   let html='';
   Object.keys(byZona).sort().forEach(zona=>{
-    const zonaSugs=byZona[zona];
+    const zsugs=byZona[zona];
     html+=`<div class="section-title" style="margin-top:16px;margin-bottom:8px">
-      📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${zonaSugs.length} sugerencia${zonaSugs.length!==1?'s':''}</span>
-    </div>
-    <div class="sug-grid">`;
-    zonaSugs.forEach(s=>{
+      📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${zsugs.length} sugerencia${zsugs.length!==1?'s':''}</span>
+    </div><div class="sug-grid">`;
+    zsugs.forEach(s=>{
       const isApplied=s.sessionStatus==='aplicada';
       const isDismissed=s.sessionStatus==='descartada';
+      const techFrom=s.tecnico_actual||'SIN ASIGNAR';
+      const techTo=s.tecnico_sugerido||'';
       html+=`
       <div class="sug-mini-card ${isApplied?'aplicada':isDismissed?'descartada':s.riesgo==='alto'?'riesgo-alto':''}" id="sug-${esc(s.orden)}">
         <div class="sug-mini-top">
           <span class="sug-orden-mini">📋 ${esc(s.orden)}</span>
-          <span class="sug-score-mini">⭐${s.score}</span>
+          <span class="sug-score-mini">⭐ ${s.score}</span>
         </div>
         <div class="sug-mini-tipo">
           <span class="tag" style="font-size:10px">${esc(s.tipo)}</span>
-          ${s.interzona?'<span class="tag" style="font-size:10px;color:var(--orange);border-color:var(--orange)">🗺</span>':''}
-          ${isApplied?'<span class="tag" style="font-size:10px;color:var(--green)">✓</span>':''}
-          ${isDismissed?'<span class="tag" style="font-size:10px;color:var(--text3)">—</span>':''}
+          ${s.interzona?'<span class="tag" style="font-size:10px;color:var(--orange);border-color:var(--orange)">🗺 Interzona</span>':''}
+          ${isApplied?'<span class="tag" style="font-size:10px;color:var(--green)">✓ Aplicada</span>':''}
+          ${isDismissed?'<span class="tag" style="font-size:10px;color:var(--text3)">— Descartada</span>':''}
         </div>
         <div class="sug-mini-arrow">
-          <span class="sug-tech-from" title="${esc(s.tecnico_actual||'SIN ASIGNAR')}">${esc((s.tecnico_actual||'SIN ASIGNAR').split(' ')[0])}</span>
-          <span style="color:var(--blue);font-weight:700;margin:0 4px">→</span>
-          <span class="sug-tech-to" title="${esc(s.tecnico_sugerido)}">${esc(s.tecnico_sugerido.split(' ')[0])}</span>
+          <span class="sug-tech-from" title="${esc(techFrom)}">${esc(techFrom)}</span>
+          <span style="color:var(--blue);font-weight:700">→</span>
+          <span class="sug-tech-to" title="${esc(techTo)}">${esc(techTo)}</span>
         </div>
-        <div class="sug-mini-franja">⏰ ${esc(s.franja_actual)}${s.franja_sugerida&&s.franja_sugerida!==s.franja_actual?' → '+esc(s.franja_sugerida):''}</div>
-        <div class="sug-mini-riesgo">${riskBadge(s.riesgo)} ${esc(s.beneficio||'').substring(0,40)}${(s.beneficio||'').length>40?'…':''}</div>
-        <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,60))}${(s.motivo||'').length>60?'…':''}</div>
+        <div class="sug-mini-franja">⏰ ${esc(s.franja_actual)}${s.franja_sugerida&&s.franja_sugerida!==s.franja_actual?' → <strong>'+esc(s.franja_sugerida)+'</strong>':''}</div>
+        <div class="sug-mini-riesgo">${riskBadge(s.riesgo)} ${esc((s.beneficio||'').substring(0,55))}${(s.beneficio||'').length>55?'…':''}</div>
+        <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,80))}${(s.motivo||'').length>80?'…':''}</div>
         <div class="sug-mini-actions">
-          ${!isApplied?`<button class="btn btn-sm btn-green" onclick="sugAccion('${esc(s.orden)}','aplicar')">✓</button>`:''}
+          ${!isApplied?`<button class="btn btn-sm btn-green" onclick="sugAccion('${esc(s.orden)}','aplicar')">✓ Aplicar</button>`:''}
           ${!isDismissed?`<button class="btn btn-sm btn-red" onclick="sugAccion('${esc(s.orden)}','descartar')">✕</button>`:''}
           ${(isApplied||isDismissed)?`<button class="btn btn-sm btn-ghost" onclick="sugAccion('${esc(s.orden)}','revertir')">↩</button>`:''}
+          <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:10px" title="Excluir ${esc(techFrom)} de sugerencias" onclick="excAddFromSug('${esc(techFrom)}')">🚫 Excluir</button>
         </div>
       </div>`;
     });
-    html+='</div>'; // close sug-grid
+    html+='</div>';
   });
   list.innerHTML=html;
+}
+
+function renderIntercambios(){
+  if(!DATA) return;
+  const intercambios = DATA.intercambios||[];
+  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
+  const estadoFilt = document.getElementById('f-sug-estado').value;
+
+  let list_data = intercambios;
+  if(zonaFilt) list_data = list_data.filter(s=>(s.zona||'').toUpperCase()===zonaFilt || (s.zona_b||'').toUpperCase()===zonaFilt);
+  if(EXCLUIDOS_SUGS.size) list_data = list_data.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
+  if(estadoFilt==='aplicada') list_data = list_data.filter(s=>SESSION.applied['INT_'+s.orden+'_'+s.orden_b]);
+  else if(estadoFilt==='descartada') list_data = list_data.filter(s=>SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
+  else if(estadoFilt==='pendiente') list_data = list_data.filter(s=>!SESSION.applied['INT_'+s.orden+'_'+s.orden_b] && !SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
+
+  document.getElementById('int-count').textContent = list_data.length;
+  const container = document.getElementById('intercambios-list');
+  const header = document.getElementById('intercambios-header');
+  if(!list_data.length){
+    container.innerHTML = `<div class="no-data" style="padding:14px 0"><div class="icon">🔄</div><div>Sin intercambios sugeridos con los filtros actuales</div></div>`;
+    header.style.display = intercambios.length ? '' : 'none';
+    return;
+  }
+  header.style.display = '';
+
+  // Agrupar por franja
+  const byFranja = {};
+  list_data.forEach(s=>{ const f=s.franja_actual||'Sin Franja'; if(!byFranja[f]) byFranja[f]=[]; byFranja[f].push(s); });
+
+  let html = '';
+  Object.keys(byFranja).sort().forEach(franja=>{
+    const items = byFranja[franja];
+    html += `<div style="font-size:12px;font-weight:600;color:var(--text3);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.5px">⏰ ${esc(franja)} — ${items.length} intercambio${items.length!==1?'s':''}</div>
+    <div class="sug-grid">`;
+    items.forEach(s=>{
+      const key = 'INT_'+s.orden+'_'+s.orden_b;
+      const isApplied = !!SESSION.applied[key];
+      const isDismissed = !!SESSION.dismissed[key];
+      const saving = s.dist_saving_km ? ` · 📍-${s.dist_saving_km}km` : '';
+      html += `
+      <div class="sug-mini-card intercambio ${isApplied?'aplicada':isDismissed?'descartada':''}" id="int-${esc(String(s.orden))}">
+        <div class="sug-mini-top">
+          <span class="swap-badge">🔄 INTERCAMBIO</span>
+          <span class="sug-score-mini">⭐ ${s.score}</span>
+        </div>
+        <div class="sug-mini-tipo">
+          <span class="tag" style="font-size:10px">${esc(s.tipo)}</span>
+          ${riskBadge(s.riesgo)}
+          ${isApplied?'<span class="tag" style="font-size:10px;color:var(--green)">✓ Aplicado</span>':''}
+          ${isDismissed?'<span class="tag" style="font-size:10px;color:var(--text3)">— Descartado</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:1px 0">Orden <strong>${esc(String(s.orden))}</strong> (zona ${esc(s.zona||'?')})</div>
+        <div class="sug-mini-arrow">
+          <span class="sug-tech-from" title="${esc(s.tecnico_actual)}">${esc(s.tecnico_actual)}</span>
+          <span style="color:var(--blue);font-weight:700;font-size:16px">⇄</span>
+          <span class="sug-tech-swap" title="${esc(s.tecnico_sugerido)}">${esc(s.tecnico_sugerido)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:1px 0">Orden <strong>${esc(String(s.orden_b))}</strong> (zona ${esc(s.zona_b||'?')})</div>
+        <div class="sug-mini-riesgo">${esc((s.beneficio||'').substring(0,65))}${(s.beneficio||'').length>65?'…':''}${saving}</div>
+        <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,80))}${(s.motivo||'').length>80?'…':''}</div>
+        <div class="sug-mini-actions">
+          ${!isApplied?`<button class="btn btn-sm btn-green" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','aplicar')">✓ Aplicar</button>`:''}
+          ${!isDismissed?`<button class="btn btn-sm btn-red" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','descartar')">✕</button>`:''}
+          ${(isApplied||isDismissed)?`<button class="btn btn-sm btn-ghost" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','revertir')">↩</button>`:''}
+          <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:10px" onclick="excAddFromSug('${esc(s.tecnico_actual)}')">🚫 Excluir</button>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function intAccion(orden, orden_b, accion){
+  const key = 'INT_'+orden+'_'+orden_b;
+  if(accion==='aplicar') SESSION.applied[key]=true, delete SESSION.dismissed[key];
+  else if(accion==='descartar') SESSION.dismissed[key]=true, delete SESSION.applied[key];
+  else delete SESSION.applied[key], delete SESSION.dismissed[key];
+  renderIntercambios();
+  const msgs={aplicar:'✓ Intercambio marcado como aplicado',descartar:'— Intercambio descartado',revertir:'↩ Revertido a pendiente'};
+  toast(msgs[accion]||'OK');
 }
 
 async function sugAccion(orden, accion){
@@ -909,6 +987,11 @@ function populateFilters(){
   const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
   fillSelect('filter-tech-zona', zonas);
   fillSelect('f-sug-zona',       zonas);
+  // Poblar dropdown de exclusión con todos los técnicos
+  const excSel = document.getElementById('f-sug-excluir-select');
+  if(excSel){
+    excSel.innerHTML=`<option value="">🚫 Excluir técnico...</option>`+techs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  }
   fillSelect('f-mov-tech',  techs);
   fillSelect('f-mov-franja', franjas);
   fillSelect('f-mov-tipo',   tipos);
@@ -920,102 +1003,4 @@ function populateFilters(){
 // ── Auto-load on page open ──
 // Data loads only when user uploads Excel — no auto Metabase call
 
-// ─────────────────────────────────────────────
-// EXCEPCIONES (Lista negra / blacklist)
-// ─────────────────────────────────────────────
-async function excLoad(){
-  try {
-    const r = await api('/api/blacklist');
-    const list = r.blacklist||[];
-    document.getElementById('exc-count').textContent = list.length;
-    const el = document.getElementById('exc-list');
-    if(!list.length){
-      el.innerHTML = '<div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>';
-      return;
-    }
-    el.innerHTML = list.map(t=>`
-      <div class="alert-item alert-media" style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <span style="flex:1;font-weight:600">👷 ${esc(t)}</span>
-        <button class="btn btn-sm btn-red" onclick="excRemove('${esc(t)}')">✕ Quitar</button>
-      </div>`).join('');
-  } catch(e){ toast('Error cargando excepciones: '+e.message,'error'); }
-}
-
-async function excAdd(){
-  const input = document.getElementById('exc-input');
-  const name = (input.value||'').trim();
-  if(!name){ toast('Escribe el nombre del técnico','error'); return; }
-  try {
-    await api('/api/blacklist/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico:name})});
-    input.value='';
-    toast(`🚫 "${name}" agregado a excepciones`);
-    excLoad();
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-async function excRemove(name){
-  try {
-    await api('/api/blacklist/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico:name})});
-    toast(`✓ "${name}" removido de excepciones`);
-    excLoad();
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-async function excClear(){
-  if(!confirm('¿Limpiar todas las excepciones?')) return;
-  try {
-    await api('/api/blacklist/clear',{method:'POST'});
-    toast('Lista de excepciones limpiada');
-    excLoad();
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-// ─────────────────────────────────────────────
-// INFORME DIARIO (Google Sheets export log)
-// ─────────────────────────────────────────────
-const EXPORT_LOG = []; // historial de exportaciones de la sesión
-
-function informeLoad(){
-  const listEl = document.getElementById('informe-list');
-  const count = document.getElementById('informe-count');
-  count.textContent = EXPORT_LOG.length;
-  if(!EXPORT_LOG.length){
-    listEl.innerHTML = '<div class="no-data"><div class="icon">📊</div><div>Sin exportaciones aún — sube el Excel y presiona "Exportar a Sheets"</div></div>';
-    return;
-  }
-  listEl.innerHTML = EXPORT_LOG.slice().reverse().map((e,i)=>`
-    <div class="alert-item alert-${i===0?'critica':'media'}" style="margin-bottom:6px">
-      <span class="alert-icon">📊</span>
-      <div class="alert-body">
-        <div class="title">Exportación #${EXPORT_LOG.length-i} — ${esc(e.hora)}</div>
-        <div class="detail">${e.ordenes} órdenes enviadas · ${esc(e.estado)}</div>
-      </div>
-      <span class="alert-badge">${i===0?'ÚLTIMO':('#'+(EXPORT_LOG.length-i))}</span>
-    </div>`).join('');
-}
-
-async function exportarASheets(){
-  const btn = document.getElementById('sheets-btn');
-  const status = document.getElementById('sheets-status');
-  if(!DATA || !DATA.resumen || DATA.resumen.total_ordenes===0){
-    toast('Primero sube el Excel del día','error'); return;
-  }
-  btn.disabled=true; btn.textContent='⏳ Enviando...';
-  status.textContent='Enviando datos a Google Sheets...';
-  try {
-    const r = await api('/api/export-sheets',{method:'POST'});
-    const hora = new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
-    EXPORT_LOG.push({hora, ordenes: r.ordenes_env||0, estado: r.sheets?.status||'ok'});
-    status.textContent = `✓ Último envío: ${hora} — ${r.ordenes_env} órdenes`;
-    toast(`📊 ${r.ordenes_env} órdenes enviadas a Sheets`);
-    informeLoad();
-  } catch(e){
-    status.textContent = '✗ Error al enviar';
-    toast('Error al exportar: '+e.message,'error');
-  }
-  finally{ btn.disabled=false; btn.textContent='📊 Exportar a Sheets'; }
-}
-
-</script>
-</body>
-</html>
+// ───────────────────────────�

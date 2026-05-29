@@ -184,6 +184,30 @@ tr:hover td{background:var(--surface2)}
 .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;background:var(--surface2);color:var(--text2)}
 .no-data{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;color:var(--text3);gap:8px}
 .no-data .icon{font-size:36px;opacity:.4}
+
+/* ── Vista Analista (filtro global de técnicos) ── */
+#analista-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:52px;z-index:90}
+#analista-bar.hidden{display:none}
+.analista-label{font-size:12px;color:var(--text3);white-space:nowrap;font-weight:600}
+.analista-dropdown-wrap{position:relative}
+.analista-trigger{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:4px 12px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-width:200px;justify-content:space-between}
+.analista-trigger.active{border-color:var(--blue);color:var(--blue)}
+.analista-trigger:hover{border-color:var(--blue)}
+.analista-dropdown{position:absolute;top:calc(100% + 4px);left:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);min-width:240px;max-height:280px;overflow-y:auto;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
+.analista-dropdown.open{display:block}
+.analista-search{padding:8px 10px;border-bottom:1px solid var(--border)}
+.analista-search input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:4px 8px;font-size:12px;outline:none}
+.analista-option{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text2)}
+.analista-option:hover{background:rgba(56,139,253,.1);color:var(--text)}
+.analista-option input[type=checkbox]{accent-color:var(--blue);width:14px;height:14px;flex-shrink:0}
+.analista-option.checked{color:var(--text)}
+.analista-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.analista-chip{display:inline-flex;align-items:center;gap:5px;background:var(--blue-bg);border:1px solid var(--blue);border-radius:10px;padding:2px 10px;font-size:12px;color:var(--blue);white-space:nowrap}
+.analista-chip button{background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px}
+.analista-chip button:hover{color:#fff}
+.analista-clear{background:none;border:1px solid var(--border);border-radius:var(--radius);color:var(--text3);padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+.analista-clear:hover{border-color:var(--red);color:var(--red)}
+#analista-active-label{font-size:11px;color:var(--text3);white-space:nowrap;margin-left:4px}
 </style>
 </head>
 <body>
@@ -204,6 +228,26 @@ tr:hover td{background:var(--surface2)}
     📂 Subir Excel
   </label>
   <input type="file" id="excel-file" accept=".xlsx" style="display:none" onchange="uploadExcel(this)">
+</div>
+
+<!-- ── Vista Analista: filtro global de técnicos ── -->
+<div id="analista-bar">
+  <span class="analista-label">👤 Vista analista:</span>
+  <div class="analista-dropdown-wrap" id="analista-wrap">
+    <button class="analista-trigger" id="analista-trigger" onclick="toggleAnalistaDropdown()">
+      <span id="analista-trigger-text">Todos los técnicos</span>
+      <span style="font-size:10px;opacity:.6">▼</span>
+    </button>
+    <div class="analista-dropdown" id="analista-dropdown">
+      <div class="analista-search">
+        <input type="text" placeholder="Buscar técnico..." id="analista-search-input" oninput="filterAnalistaOptions()" autocomplete="off">
+      </div>
+      <div id="analista-options-list"></div>
+    </div>
+  </div>
+  <div class="analista-chips" id="analista-chips"></div>
+  <button class="analista-clear" id="analista-clear-btn" onclick="clearTechFilter()" style="display:none">✕ Limpiar selección</button>
+  <span id="analista-active-label"></span>
 </div>
 
 <div class="main">
@@ -417,6 +461,97 @@ tr:hover td{background:var(--surface2)}
 let DATA = null;
 let SESSION = { applied: {}, dismissed: {} };
 
+// ── Vista Analista: filtro global de técnicos ──
+const TECH_FILTER = new Set();
+
+/** Retorna true si el técnico debe mostrarse según el filtro activo */
+function techVisible(nombre) {
+  if (!TECH_FILTER.size) return true;
+  return TECH_FILTER.has(nombre);
+}
+
+function toggleTech(nombre) {
+  if (TECH_FILTER.has(nombre)) TECH_FILTER.delete(nombre);
+  else TECH_FILTER.add(nombre);
+  updateAnalistaUI();
+  renderAll();
+}
+
+function clearTechFilter() {
+  TECH_FILTER.clear();
+  updateAnalistaUI();
+  renderAll();
+}
+
+function toggleAnalistaDropdown() {
+  const dd = document.getElementById('analista-dropdown');
+  dd.classList.toggle('open');
+  if (dd.classList.contains('open')) {
+    document.getElementById('analista-search-input').focus();
+    // Cierra al hacer click fuera
+    setTimeout(() => document.addEventListener('click', closeAnalistaOnOutside, {once:true}), 0);
+  }
+}
+
+function closeAnalistaOnOutside(e) {
+  const wrap = document.getElementById('analista-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('analista-dropdown').classList.remove('open');
+  } else {
+    // Re-registrar si el click fue dentro
+    setTimeout(() => document.addEventListener('click', closeAnalistaOnOutside, {once:true}), 0);
+  }
+}
+
+function filterAnalistaOptions() {
+  const q = (document.getElementById('analista-search-input').value||'').toLowerCase();
+  document.querySelectorAll('.analista-option').forEach(el => {
+    el.style.display = el.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function buildAnalistaOptions() {
+  if (!DATA) return;
+  const techs = [...new Set((DATA.carga_por_tecnico||[]).map(t => t.tecnico))].sort();
+  const list = document.getElementById('analista-options-list');
+  list.innerHTML = techs.map(t => {
+    const checked = TECH_FILTER.has(t);
+    return `<label class="analista-option ${checked?'checked':''}" data-name="${esc(t)}">
+      <input type="checkbox" ${checked?'checked':''} onchange="toggleTech('${esc(t)}')">
+      <span>${esc(t)}</span>
+    </label>`;
+  }).join('');
+}
+
+function updateAnalistaUI() {
+  const active = TECH_FILTER.size > 0;
+  const trigger = document.getElementById('analista-trigger');
+  const triggerText = document.getElementById('analista-trigger-text');
+  const chips = document.getElementById('analista-chips');
+  const clearBtn = document.getElementById('analista-clear-btn');
+  const label = document.getElementById('analista-active-label');
+
+  trigger.classList.toggle('active', active);
+  triggerText.textContent = active ? `${TECH_FILTER.size} técnico${TECH_FILTER.size!==1?'s':''} seleccionado${TECH_FILTER.size!==1?'s':''}` : 'Todos los técnicos';
+  clearBtn.style.display = active ? '' : 'none';
+  label.textContent = active ? '— filtrando todas las vistas' : '';
+
+  // Chips
+  chips.innerHTML = [...TECH_FILTER].map(n =>
+    `<span class="analista-chip">👤 ${esc(n)} <button onclick="toggleTech('${esc(n)}')" title="Quitar">×</button></span>`
+  ).join('');
+
+  // Sync checkboxes en el dropdown (si está abierto)
+  document.querySelectorAll('.analista-option').forEach(el => {
+    const cb = el.querySelector('input[type=checkbox]');
+    if (cb) {
+      const isChecked = TECH_FILTER.has(el.dataset.name);
+      cb.checked = isChecked;
+      el.classList.toggle('checked', isChecked);
+    }
+  });
+}
+
 // ── Colores y helpers ──
 const STATUS_CLASS = {
   'movible': 'badge-movible', 'bloqueado': 'badge-bloqueado',
@@ -535,6 +670,8 @@ async function uploadExcel(input){
 // ── Render All ──
 function renderAll(){
   if(!DATA) return;
+  buildAnalistaOptions();
+  updateAnalistaUI();
   renderResumen();
   renderTecnicos();
   renderFranjas();
@@ -636,6 +773,8 @@ function renderTecnicos(){
   const zonaFilt = (document.getElementById('filter-tech-zona').value||'').toUpperCase();
   const sFilter = document.getElementById('filter-tech-sobrecarga').value;
   let techs = DATA.carga_por_tecnico||[];
+  // Filtro global de analista
+  if(TECH_FILTER.size) techs = techs.filter(t=>TECH_FILTER.has(t.tecnico));
   if(search) techs = techs.filter(t=>t.tecnico.toLowerCase().includes(search));
   if(zonaFilt) techs = techs.filter(t=>(t.zona||'').toUpperCase()===zonaFilt);
   if(sFilter==='sobrecarga') techs = techs.filter(t=>t.sobrecarga && t.tecnico!=='SIN_ASIGNAR');
@@ -709,7 +848,9 @@ function renderFranjas(){
   // Tabla detalle
   const tbody = document.querySelector('#franja-detail-table tbody');
   let rows='';
-  (DATA.carga_por_tecnico||[]).forEach(t=>{
+  let detalleTechs = DATA.carga_por_tecnico||[];
+  if(TECH_FILTER.size) detalleTechs = detalleTechs.filter(t=>TECH_FILTER.has(t.tecnico));
+  detalleTechs.forEach(t=>{
     Object.entries(t.franjas||{}).forEach(([f,c])=>{
       rows+=`<tr><td>${esc(f)}</td><td>${esc(t.tecnico)}</td><td>${t.total}</td><td style="color:var(--green)">${t.movibles}</td><td>${t.bloqueadas}</td></tr>`;
     });
@@ -721,6 +862,8 @@ function renderFranjas(){
 function renderMovibles(){
   if(!DATA) return;
   let orders = DATA.ordenes_movibles||[];
+  // Filtro global de analista
+  if(TECH_FILTER.size) orders=orders.filter(o=>TECH_FILTER.has(o.tecnico));
   const tech   = document.getElementById('f-mov-tech').value;
   const franja = document.getElementById('f-mov-franja').value;
   const tipo   = document.getElementById('f-mov-tipo').value;
@@ -753,6 +896,8 @@ function renderMovibles(){
 function renderBloqueadas(){
   if(!DATA) return;
   let orders = DATA.ordenes_bloqueadas||[];
+  // Filtro global de analista
+  if(TECH_FILTER.size) orders=orders.filter(o=>TECH_FILTER.has(o.tecnico));
   const tech   = document.getElementById('f-blq-tech').value;
   const estado = document.getElementById('f-blq-estado').value;
   if(tech)   orders=orders.filter(o=>o.tecnico===tech);
@@ -782,6 +927,8 @@ function renderBloqueadas(){
 function renderAlertas(){
   if(!DATA) return;
   let alertas = DATA.alertas||[];
+  // Filtro global de analista (por técnico de la alerta)
+  if(TECH_FILTER.size) alertas=alertas.filter(a=>!a.tecnico || TECH_FILTER.has(a.tecnico));
   const sev  = document.getElementById('f-alert-sev').value;
   const tipo = document.getElementById('f-alert-tipo').value;
   if(sev)  alertas=alertas.filter(a=>a.severidad===sev);
@@ -809,6 +956,8 @@ function renderAlertas(){
 function renderSugerencias(){
   if(!DATA) return;
   let sugs = DATA.sugerencias||[];
+  // Filtro global de analista: mostrar sugerencias donde el técnico actual o sugerido esté en el filtro
+  if(TECH_FILTER.size) sugs=sugs.filter(s=>TECH_FILTER.has(s.tecnico_actual||'') || TECH_FILTER.has(s.tecnico_sugerido||''));
   const estadoFilt = document.getElementById('f-sug-estado').value;
   const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
   const riesgoFilt = document.getElementById('f-sug-riesgo').value;
@@ -879,6 +1028,8 @@ function renderIntercambios(){
   const estadoFilt = document.getElementById('f-sug-estado').value;
 
   let list_data = intercambios;
+  // Filtro global de analista
+  if(TECH_FILTER.size) list_data=list_data.filter(s=>TECH_FILTER.has(s.tecnico_actual||'') || TECH_FILTER.has(s.tecnico_sugerido||''));
   if(zonaFilt) list_data = list_data.filter(s=>(s.zona||'').toUpperCase()===zonaFilt || (s.zona_b||'').toUpperCase()===zonaFilt);
   if(EXCLUIDOS_SUGS.size) list_data = list_data.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
   if(estadoFilt==='aplicada') list_data = list_data.filter(s=>SESSION.applied['INT_'+s.orden+'_'+s.orden_b]);
@@ -960,189 +1111,4 @@ function intAccion(orden, orden_b, accion){
 
 async function sugAccion(orden, accion){
   try {
-    await api('/api/sugerencias/accion', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({orden, accion})
-    });
-    if(accion==='aplicar') SESSION.applied[orden]=true, delete SESSION.dismissed[orden];
-    else if(accion==='descartar') SESSION.dismissed[orden]=true, delete SESSION.applied[orden];
-    else delete SESSION.applied[orden], delete SESSION.dismissed[orden];
-    renderSugerencias();
-    const msgs={aplicar:'✓ Sugerencia marcada como aplicada',descartar:'— Sugerencia descartada',revertir:'↩ Revertida a pendiente'};
-    toast(msgs[accion]||'OK');
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-// ── Filtros dinámicos ──
-function populateFilters(){
-  if(!DATA) return;
-  const techs = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.tecnico))].sort();
-  const franjas = [...new Set((DATA.carga_por_franja||[]).map(f=>f.franja))];
-  const tipos = [...new Set([...(DATA.ordenes_movibles||[]),...(DATA.ordenes_bloqueadas||[])].map(o=>o.tipo).filter(Boolean))].sort();
-  const estados = [...new Set((DATA.ordenes_bloqueadas||[]).map(o=>o.estado))].sort();
-  const alertTipos = [...new Set((DATA.alertas||[]).map(a=>a.tipo))];
-
-  const fillSelect=(id, vals, cur)=>{
-    const el=document.getElementById(id); if(!el) return;
-    const prev=el.value||cur||'';
-    el.innerHTML=`<option value="">${el.options[0]?.text||'Todos'}</option>`+vals.map(v=>`<option value="${esc(v)}" ${v===prev?'selected':''}>${esc(v)}</option>`).join('');
-    el.value=prev;
-  };
-  const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
-  fillSelect('filter-tech-zona', zonas);
-  fillSelect('f-sug-zona',       zonas);
-  // Poblar dropdown de exclusión con todos los técnicos
-  const excSel = document.getElementById('f-sug-excluir-select');
-  if(excSel){
-    excSel.innerHTML=`<option value="">🚫 Excluir técnico...</option>`+techs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
-  }
-  fillSelect('f-mov-tech',  techs);
-  fillSelect('f-mov-franja', franjas);
-  fillSelect('f-mov-tipo',   tipos);
-  fillSelect('f-blq-tech',   techs);
-  fillSelect('f-blq-estado', estados);
-  fillSelect('f-alert-tipo', alertTipos);
-}
-
-// ─── EXCLUIDOS EN SUGERENCIAS (filtro local de vista) ───────────────────────
-const EXCLUIDOS_SUGS = new Set();
-
-function excluirTecnicoSug(){
-  const sel = document.getElementById('f-sug-excluir-select');
-  if(!sel||!sel.value) return;
-  const nombre = sel.value;
-  EXCLUIDOS_SUGS.add(nombre);
-  sel.value='';
-  renderExcluidosPills();
-  renderSugerencias();
-  renderIntercambios();
-}
-
-function quitarExcluidoSug(nombre){
-  EXCLUIDOS_SUGS.delete(nombre);
-  renderExcluidosPills();
-  renderSugerencias();
-  renderIntercambios();
-}
-
-function renderExcluidosPills(){
-  const container = document.getElementById('excluidos-pills');
-  if(!container) return;
-  if(!EXCLUIDOS_SUGS.size){ container.innerHTML=''; return; }
-  container.innerHTML=[...EXCLUIDOS_SUGS].map(n=>
-    `<span class="excluido-pill">🚫 ${esc(n)} <button onclick="quitarExcluidoSug('${esc(n)}')" title="Quitar">x</button></span>`
-  ).join('');
-}
-
-function excAddFromSug(nombre){
-  if(!nombre) return;
-  EXCLUIDOS_SUGS.add(nombre);
-  renderExcluidosPills();
-  renderSugerencias();
-  renderIntercambios();
-  toast(`🚫 "${nombre}" excluido de sugerencias`);
-}
-
-// ─── Lista negra / Excepciones ───────────────────────────────────────────────
-async function excAdd(){
-  const input = document.getElementById('exc-input');
-  const nombre = (input?.value||'').trim();
-  if(!nombre){ toast('Escribe el nombre del tecnico','error'); return; }
-  try {
-    await api('/api/blacklist/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
-    input.value='';
-    toast(`🚫 "${nombre}" agregado a excepciones`);
-    const data = await api('/api/blacklist');
-    renderExcList(data.blacklist||[]);
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-async function excClear(){
-  if(!confirm('Limpiar todas las excepciones?')) return;
-  try {
-    await api('/api/blacklist/clear', {method:'POST'});
-    toast('Lista de excepciones limpiada');
-    renderExcList([]);
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-function renderExcList(list){
-  const el = document.getElementById('exc-list');
-  document.getElementById('exc-count').textContent = list.length;
-  if(!list.length){
-    el.innerHTML='<div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>';
-    return;
-  }
-  el.innerHTML = list.map(n=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
-      <span>🚫 ${esc(n)}</span>
-      <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="excRemove('${esc(n)}')">Quitar</button>
-    </div>`).join('');
-}
-
-async function excRemove(nombre){
-  try {
-    await api('/api/blacklist/remove', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
-    toast(`"${nombre}" quitado de excepciones`);
-    const data = await api('/api/blacklist');
-    renderExcList(data.blacklist||[]);
-  } catch(e){ toast('Error: '+e.message,'error'); }
-}
-
-// ─── Informe Diario / Exportar a Google Sheets ───────────────────────────────
-const EXPORT_LOG = [];
-
-async function exportarASheets(){
-  if(!DATA||!DATA.resumen||DATA.resumen.total_ordenes===0){
-    toast('Sube primero el Excel para exportar','error'); return;
-  }
-  const btns = ['sheets-btn','sheets-btn2'].map(id=>document.getElementById(id)).filter(Boolean);
-  const statuses = ['sheets-status','sheets-status2'].map(id=>document.getElementById(id)).filter(Boolean);
-  btns.forEach(b=>b.disabled=true);
-  statuses.forEach(s=>s.textContent='Exportando...');
-  try {
-    await api('/api/export-sheets', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({data: DATA})
-    });
-    const now = new Date().toLocaleTimeString('es-CO');
-    EXPORT_LOG.unshift({hora:now, ordenes:DATA.resumen.total_ordenes, status:'OK'});
-    statuses.forEach(s=>s.textContent='Exportado a las '+now);
-    toast('Datos exportados a Google Sheets');
-    informeLoad();
-  } catch(e){
-    const now = new Date().toLocaleTimeString('es-CO');
-    EXPORT_LOG.unshift({hora:now, ordenes:0, status:'Error: '+e.message});
-    statuses.forEach(s=>s.textContent='Error: '+e.message);
-    toast('Error al exportar: '+e.message,'error');
-  } finally {
-    btns.forEach(b=>b.disabled=false);
-  }
-}
-
-function informeLoad(){
-  const list = document.getElementById('informe-list');
-  if(!list) return;
-  document.getElementById('informe-count').textContent = EXPORT_LOG.length;
-  if(!EXPORT_LOG.length){
-    list.innerHTML='<div class="no-data"><div class="icon">📊</div><div>Sin exportaciones — sube el Excel y presiona Exportar a Sheets</div></div>';
-    return;
-  }
-  list.innerHTML = EXPORT_LOG.map(e=>`
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
-      <span style="font-size:18px">${e.status==='OK'?'OK':'ERR'}</span>
-      <div>
-        <div style="font-weight:600;font-size:13px">${e.status==='OK'?e.ordenes+' ordenes exportadas':esc(e.status)}</div>
-        <div style="font-size:11px;color:var(--text3)">Exportado a las ${e.hora}</div>
-      </div>
-    </div>`).join('');
-}
-
-
-// Sin autoload — usuario sube Excel manualmente
-
-</script>
-</body>
-</html>
+    awai

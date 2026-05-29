@@ -185,14 +185,12 @@ tr:hover td{background:var(--surface2)}
 .no-data{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;color:var(--text3);gap:8px}
 .no-data .icon{font-size:36px;opacity:.4}
 
-/* ── Vista Analista (filtro global de técnicos) ── */
+/* Vista Analista */
 #analista-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:52px;z-index:90}
-#analista-bar.hidden{display:none}
-.analista-label{font-size:12px;color:var(--text3);white-space:nowrap;font-weight:600}
+.analista-label{font-size:12px;color:var(--text3);font-weight:600;white-space:nowrap}
 .analista-dropdown-wrap{position:relative}
 .analista-trigger{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:4px 12px;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;min-width:200px;justify-content:space-between}
-.analista-trigger.active{border-color:var(--blue);color:var(--blue)}
-.analista-trigger:hover{border-color:var(--blue)}
+.analista-trigger.active{border-color:var(--blue);color:var(--blue)}.analista-trigger:hover{border-color:var(--blue)}
 .analista-dropdown{position:absolute;top:calc(100% + 4px);left:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);min-width:240px;max-height:280px;overflow-y:auto;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);display:none}
 .analista-dropdown.open{display:block}
 .analista-search{padding:8px 10px;border-bottom:1px solid var(--border)}
@@ -204,10 +202,9 @@ tr:hover td{background:var(--surface2)}
 .analista-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .analista-chip{display:inline-flex;align-items:center;gap:5px;background:var(--blue-bg);border:1px solid var(--blue);border-radius:10px;padding:2px 10px;font-size:12px;color:var(--blue);white-space:nowrap}
 .analista-chip button{background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px}
-.analista-chip button:hover{color:#fff}
 .analista-clear{background:none;border:1px solid var(--border);border-radius:var(--radius);color:var(--text3);padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
 .analista-clear:hover{border-color:var(--red);color:var(--red)}
-#analista-active-label{font-size:11px;color:var(--text3);white-space:nowrap;margin-left:4px}
+#analista-active-label{font-size:11px;color:var(--text3);margin-left:4px}
 </style>
 </head>
 <body>
@@ -230,26 +227,26 @@ tr:hover td{background:var(--surface2)}
   <input type="file" id="excel-file" accept=".xlsx" style="display:none" onchange="uploadExcel(this)">
 </div>
 
-<!-- ── Vista Analista: filtro global de técnicos ── -->
+
+<!-- Vista Analista -->
 <div id="analista-bar">
-  <span class="analista-label">👤 Vista analista:</span>
+  <span class="analista-label">&#128100; Vista analista:</span>
   <div class="analista-dropdown-wrap" id="analista-wrap">
     <button class="analista-trigger" id="analista-trigger" onclick="toggleAnalistaDropdown()">
-      <span id="analista-trigger-text">Todos los técnicos</span>
-      <span style="font-size:10px;opacity:.6">▼</span>
+      <span id="analista-trigger-text">Todos los t&#233;cnicos</span>
+      <span style="font-size:10px;opacity:.6">&#9660;</span>
     </button>
     <div class="analista-dropdown" id="analista-dropdown">
       <div class="analista-search">
-        <input type="text" placeholder="Buscar técnico..." id="analista-search-input" oninput="filterAnalistaOptions()" autocomplete="off">
+        <input type="text" placeholder="Buscar t&#233;cnico..." id="analista-search-input" oninput="filterAnalistaOptions()" autocomplete="off">
       </div>
       <div id="analista-options-list"></div>
     </div>
   </div>
   <div class="analista-chips" id="analista-chips"></div>
-  <button class="analista-clear" id="analista-clear-btn" onclick="clearTechFilter()" style="display:none">✕ Limpiar selección</button>
+  <button class="analista-clear" id="analista-clear-btn" onclick="clearTechFilter()" style="display:none">&#10005; Limpiar</button>
   <span id="analista-active-label"></span>
 </div>
-
 <div class="main">
 
 <!-- ── Sidebar ── -->
@@ -456,106 +453,122 @@ tr:hover td{background:var(--surface2)}
 </div><!-- /main -->
 </div><!-- /shell -->
 
-<!-- SheetJS para modo escritorio (sin servidor) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-// ── Detección de modo ──
 const DESKTOP_MODE = (location.protocol === 'file:' || location.hostname === '');
+
+// ── Vista Analista ──
+const TECH_FILTER = new Set();
+function toggleTech(n){TECH_FILTER.has(n)?TECH_FILTER.delete(n):TECH_FILTER.add(n);updateAnalistaUI();renderAll();}
+function clearTechFilter(){TECH_FILTER.clear();updateAnalistaUI();renderAll();}
+function toggleAnalistaDropdown(){
+  const dd=document.getElementById('analista-dropdown');
+  dd.classList.toggle('open');
+  if(dd.classList.contains('open')){
+    document.getElementById('analista-search-input').focus();
+    setTimeout(()=>document.addEventListener('click',function h(e){if(!document.getElementById('analista-wrap').contains(e.target))dd.classList.remove('open');else document.addEventListener('click',h,{once:true});},{once:true}),0);
+  }
+}
+function filterAnalistaOptions(){
+  const q=(document.getElementById('analista-search-input').value||'').toLowerCase();
+  document.querySelectorAll('.analista-option').forEach(el=>el.style.display=el.dataset.name.toLowerCase().includes(q)?'':'none');
+}
+function buildAnalistaOptions(){
+  if(!DATA)return;
+  const techs=[...new Set((DATA.carga_por_tecnico||[]).map(t=>t.tecnico))].sort();
+  document.getElementById('analista-options-list').innerHTML=techs.map(t=>{
+    const c=TECH_FILTER.has(t);
+    return `<label class="analista-option ${c?'checked':''}" data-name="${esc(t)}"><input type="checkbox" ${c?'checked':''} onchange="toggleTech('${esc(t)}')">${esc(t)}</label>`;
+  }).join('');
+}
+function updateAnalistaUI(){
+  const a=TECH_FILTER.size>0;
+  document.getElementById('analista-trigger').classList.toggle('active',a);
+  document.getElementById('analista-trigger-text').textContent=a?`${TECH_FILTER.size} técnico${TECH_FILTER.size!==1?'s':''} seleccionado${TECH_FILTER.size!==1?'s':''}`:'Todos los técnicos';
+  document.getElementById('analista-clear-btn').style.display=a?'':'none';
+  document.getElementById('analista-active-label').textContent=a?'— filtrando todas las vistas':'';
+  document.getElementById('analista-chips').innerHTML=[...TECH_FILTER].map(n=>`<span class="analista-chip">&#128100; ${esc(n)} <button onclick="toggleTech('${esc(n)}')" title="Quitar">\xd7</button></span>`).join('');
+  document.querySelectorAll('.analista-option').forEach(el=>{const cb=el.querySelector('input[type=checkbox]');if(cb){const c=TECH_FILTER.has(el.dataset.name);cb.checked=c;el.classList.toggle('checked',c);}});
+}
+
+// ── Motor escritorio (sin servidor) ──
+const _MV=['por programar','programado','programada','inbound'];
+const _BL=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada','dispositivos subidos','dispositivos cargados','por auditar','finalizado','finalizada','completado','cancelado','cancelado cliente','cancelado operativo','no ejecutado','reprogramado','reagendado','otro'];
+const _FIN=['finalizado','finalizada','completado','dispositivos subidos','dispositivos cargados','por auditar','cancelado','cancelado cliente','cancelado operativo','no ejecutado'];
+const _IP=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada'];
+function _ns(x,d=''){return(x!=null&&x!==''&&String(x).toLowerCase()!='null'&&String(x).toLowerCase()!='nan')?String(x).trim():d;}
+function _nsu(x,d='SIN_VALOR'){const s=_ns(x,d);return(!s||s===d)?d:s.toUpperCase();}
+function _normSt(x){return _ns(x,'por programar').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();}
+function _classSt(e){const s=_normSt(e);if(_MV.some(m=>s.includes(m)))return'movible';if(_FIN.some(f=>s.includes(f)))return'finalizado';if(_IP.some(p=>s.includes(p)))return'bloqueado';if(_BL.some(b=>s.includes(b)))return'bloqueado';return'desconocido';}
+function _normFranjaD(x){const s=_ns(x,'').replace(/[–—]/g,'-').trim();if(!s)return'Sin Franja';const c=s.replace(/\s/g,'');for(const f of['08:00-09:30','10:00-11:30','13:00-14:30','14:30-16:00'])if(f.replace(/\s/g,'')==c)return f;return s;}
+function _buildColMap(headers){
+  const find=(...aa)=>{for(const a of aa){const f=headers.find(c=>c&&c.toLowerCase().trim()===a.toLowerCase());if(f)return f;}return null;};
+  return{id:find('appointment_id','id_orden','id','orden'),tecnico:find('tecnico','technician','tech'),estado:find('status_txt','status','estado'),franja:find('franja_label','franja','slot','horario'),tipo:find('appointment_type_txt','category','tipo','type'),zona:find('zone name','zone_name','zona','zone'),subzona:find('subzone','subzona'),direccion:find('addresses__address','addresses_address','address','direccion'),lat:find('latitude','lat'),lon:find('longitude','lon'),updated_at:find('onsite_at_cot','updated_at','updated at'),gmaps:find('google maps link','gmaps'),ciudad:find('cities__name','cities_name','ciudad')};
+}
+function _normOrderD(row,cm){
+  const g=k=>cm[k]?_ns(row[cm[k]],''):'';
+  const gf=k=>{try{const v=cm[k]?row[cm[k]]:null;return v!=null&&v!==''?parseFloat(v)||0:0;}catch(e){return 0;}};
+  const zona=_nsu(g('zona')||g('ciudad'),'SIN_ZONA')||'SIN_ZONA';
+  const clase=_classSt(g('estado')||'por programar');
+  return{id:g('id')||`sid_${Math.random().toString(36).slice(2)}`,tecnico:g('tecnico')||'SIN_ASIGNAR',estado:g('estado')||'por programar',franja:_normFranjaD(g('franja')),tipo:(g('tipo')||'instalacion').toLowerCase(),zona,subzona:_nsu(g('subzona'),'SIN_SUBZONA'),direccion:g('direccion'),lat:gf('lat'),lon:gf('lon'),updated_at:g('updated_at'),gmaps:g('gmaps'),estado_clase:clase,movible:clase==='movible',_source:'excel_desktop'};
+}
+function runLevelingJS(orders){
+  const now=new Date();
+  const byTech={};
+  for(const o of orders){const t=o.tecnico||'SIN_ASIGNAR';if(!byTech[t])byTech[t]=[];byTech[t].push(o);}
+  const cpt=Object.entries(byTech).map(([tecnico,ords])=>{
+    const total=ords.length,movibles=ords.filter(o=>o.movible).length;
+    const activas=ords.filter(o=>_IP.some(p=>_normSt(o.estado).includes(p))).length;
+    const finalizadas=ords.filter(o=>_FIN.some(f=>_normSt(o.estado).includes(f))).length;
+    const franjas={};ords.forEach(o=>{franjas[o.franja]=(franjas[o.franja]||0)+1;});
+    return{tecnico,zona:ords[0]?.zona||'SIN_ZONA',total,movibles,activas,finalizadas,bloqueadas:total-movibles,sobrecarga:total>5&&tecnico!=='SIN_ASIGNAR',franjas};
+  }).sort((a,b)=>b.total-a.total);
+  const byF={};
+  for(const o of orders){const f=o.franja||'Sin Franja';if(!byF[f])byF[f]={total:0,movibles:0,bloqueadas:0,techs:new Set()};byF[f].total++;if(o.movible)byF[f].movibles++;else byF[f].bloqueadas++;byF[f].techs.add(o.tecnico);}
+  const cpf=Object.entries(byF).map(([franja,d])=>({franja,total:d.total,movibles:d.movibles,bloqueadas:d.bloqueadas,tecnicos:d.techs.size,sobrecarga:d.total>6}));
+  const alertas=[];
+  for(const t of cpt){if(t.sobrecarga&&t.tecnico!=='SIN_ASIGNAR')alertas.push({tipo:'SOBRECARGA_TOTAL',severidad:'alta',tecnico:t.tecnico,franja:null,detalle:`${t.tecnico} tiene ${t.total} ordenes (max: 5)`});}
+  const sinTec=orders.filter(o=>o.movible&&(o.tecnico==='SIN_ASIGNAR'||!o.tecnico));
+  if(sinTec.length)alertas.push({tipo:'SIN_TECNICO',severidad:'alta',tecnico:null,franja:null,detalle:`${sinTec.length} orden(es) sin tecnico`});
+  const sinF=orders.filter(o=>o.movible&&(!o.franja||o.franja==='Sin Franja'));
+  if(sinF.length)alertas.push({tipo:'SIN_FRANJA',severidad:'media',tecnico:null,franja:null,detalle:`${sinF.length} orden(es) sin franja`});
+  const sugs=[];
+  const conCap=cpt.filter(t=>t.total<5&&t.tecnico!=='SIN_ASIGNAR');
+  for(const tech of cpt.filter(t=>t.sobrecarga)){
+    const movsTech=orders.filter(o=>o.tecnico===tech.tecnico&&o.movible);
+    let moved=0;
+    for(const o of movsTech){
+      if(moved>=tech.total-5)break;
+      const rec=conCap.find(t=>t.tecnico!==tech.tecnico);if(!rec)continue;
+      sugs.push({orden:o.id,tecnico_actual:tech.tecnico,tecnico_sugerido:rec.tecnico,franja_actual:o.franja,franja_sugerida:o.franja,tipo:o.tipo,estado:o.estado,zona:o.zona,motivo:`${tech.tecnico} tiene ${tech.total} ordenes`,beneficio:'Reduce sobrecarga',riesgo:rec.zona!==tech.zona?'alto':'bajo',score:Math.max(10,100-Math.round((rec.total/5)*100)),interzona:rec.zona!==tech.zona,bloqueos:[]});
+      rec.total++;tech.total--;moved++;
+    }
+  }
+  const movibles=orders.filter(o=>o.movible),bloqueadas=orders.filter(o=>!o.movible);
+  return{resumen:{total_ordenes:orders.length,movibles:movibles.length,bloqueadas:bloqueadas.length,alertas:alertas.length,alertas_criticas:alertas.filter(a=>a.severidad==='critica').length,sugerencias:sugs.length,tecnicos_total:cpt.filter(t=>t.tecnico!=='SIN_ASIGNAR').length,tecnicos_sobrecargados:cpt.filter(t=>t.sobrecarga&&t.tecnico!=='SIN_ASIGNAR').length,sin_tecnico:sinTec.length,sin_franja:sinF.length},carga_por_tecnico:cpt,carga_por_franja:cpf,ordenes_movibles:movibles,ordenes_bloqueadas:bloqueadas,alertas,sugerencias:sugs,intercambios:[],generado_en:now.toLocaleString('es-CO'),fuente:'excel_desktop'};
+}
+async function processExcelDesktop(file){
+  return new Promise((resolve,reject)=>{
+    if(typeof XLSX==='undefined'){reject(new Error('SheetJS no cargó. Necesitas internet la primera vez.'));return;}
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+        if(!rows.length){reject(new Error('Archivo vacío'));return;}
+        const cm=_buildColMap(Object.keys(rows[0]));
+        const orders=rows.map(r=>_normOrderD(r,cm)).filter(o=>o.id);
+        resolve(runLevelingJS(orders));
+      }catch(err){reject(err);}
+    };
+    reader.onerror=()=>reject(new Error('Error leyendo archivo'));
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 // ── Estado global ──
 let DATA = null;
 let SESSION = { applied: {}, dismissed: {} };
-
-// ── Vista Analista: filtro global de técnicos ──
-const TECH_FILTER = new Set();
-
-/** Retorna true si el técnico debe mostrarse según el filtro activo */
-function techVisible(nombre) {
-  if (!TECH_FILTER.size) return true;
-  return TECH_FILTER.has(nombre);
-}
-
-function toggleTech(nombre) {
-  if (TECH_FILTER.has(nombre)) TECH_FILTER.delete(nombre);
-  else TECH_FILTER.add(nombre);
-  updateAnalistaUI();
-  renderAll();
-}
-
-function clearTechFilter() {
-  TECH_FILTER.clear();
-  updateAnalistaUI();
-  renderAll();
-}
-
-function toggleAnalistaDropdown() {
-  const dd = document.getElementById('analista-dropdown');
-  dd.classList.toggle('open');
-  if (dd.classList.contains('open')) {
-    document.getElementById('analista-search-input').focus();
-    // Cierra al hacer click fuera
-    setTimeout(() => document.addEventListener('click', closeAnalistaOnOutside, {once:true}), 0);
-  }
-}
-
-function closeAnalistaOnOutside(e) {
-  const wrap = document.getElementById('analista-wrap');
-  if (wrap && !wrap.contains(e.target)) {
-    document.getElementById('analista-dropdown').classList.remove('open');
-  } else {
-    // Re-registrar si el click fue dentro
-    setTimeout(() => document.addEventListener('click', closeAnalistaOnOutside, {once:true}), 0);
-  }
-}
-
-function filterAnalistaOptions() {
-  const q = (document.getElementById('analista-search-input').value||'').toLowerCase();
-  document.querySelectorAll('.analista-option').forEach(el => {
-    el.style.display = el.dataset.name.toLowerCase().includes(q) ? '' : 'none';
-  });
-}
-
-function buildAnalistaOptions() {
-  if (!DATA) return;
-  const techs = [...new Set((DATA.carga_por_tecnico||[]).map(t => t.tecnico))].sort();
-  const list = document.getElementById('analista-options-list');
-  list.innerHTML = techs.map(t => {
-    const checked = TECH_FILTER.has(t);
-    return `<label class="analista-option ${checked?'checked':''}" data-name="${esc(t)}">
-      <input type="checkbox" ${checked?'checked':''} onchange="toggleTech('${esc(t)}')">
-      <span>${esc(t)}</span>
-    </label>`;
-  }).join('');
-}
-
-function updateAnalistaUI() {
-  const active = TECH_FILTER.size > 0;
-  const trigger = document.getElementById('analista-trigger');
-  const triggerText = document.getElementById('analista-trigger-text');
-  const chips = document.getElementById('analista-chips');
-  const clearBtn = document.getElementById('analista-clear-btn');
-  const label = document.getElementById('analista-active-label');
-
-  trigger.classList.toggle('active', active);
-  triggerText.textContent = active ? `${TECH_FILTER.size} técnico${TECH_FILTER.size!==1?'s':''} seleccionado${TECH_FILTER.size!==1?'s':''}` : 'Todos los técnicos';
-  clearBtn.style.display = active ? '' : 'none';
-  label.textContent = active ? '— filtrando todas las vistas' : '';
-
-  // Chips
-  chips.innerHTML = [...TECH_FILTER].map(n =>
-    `<span class="analista-chip">👤 ${esc(n)} <button onclick="toggleTech('${esc(n)}')" title="Quitar">×</button></span>`
-  ).join('');
-
-  // Sync checkboxes en el dropdown (si está abierto)
-  document.querySelectorAll('.analista-option').forEach(el => {
-    const cb = el.querySelector('input[type=checkbox]');
-    if (cb) {
-      const isChecked = TECH_FILTER.has(el.dataset.name);
-      cb.checked = isChecked;
-      el.classList.toggle('checked', isChecked);
-    }
-  });
-}
 
 // ── Colores y helpers ──
 const STATUS_CLASS = {
@@ -607,322 +620,6 @@ function toast(msg, type='success'){
   toastTimer = setTimeout(()=>{ t.style.display='none' }, 3000);
 }
 
-// ══════════════════════════════════════════════════════════════
-//  MOTOR DE NIVELACIÓN (cliente — modo escritorio)
-// ══════════════════════════════════════════════════════════════
-
-const _MOVABLE  = ['por programar','programado','programada','inbound'];
-const _BLOCKED  = ['en camino','en sitio','iniciado','iniciada','mac enviada',
-                   'mac principal enviada','dispositivos subidos','dispositivos cargados',
-                   'por auditar','finalizado','finalizada','completado',
-                   'cancelado','cancelado cliente','cancelado operativo','no ejecutado',
-                   'reprogramado','reagendado'];
-const _FINALIZED = ['finalizado','finalizada','completado','dispositivos subidos',
-                    'dispositivos cargados','por auditar','cancelado',
-                    'cancelado cliente','cancelado operativo','no ejecutado'];
-const _IN_PROGRESS = ['en camino','en sitio','iniciado','iniciada','mac enviada',
-                      'mac principal enviada'];
-const _FRANJAS = ['08:00-09:30','10:00-11:30','13:00-14:30','14:30-16:00'];
-const MAX_IDEAL = 5, MAX_ABS = 6, ONSITE_MIN = 30;
-
-function _ns(x, d='') { return (x != null && x !== '' && String(x).toLowerCase() !== 'null' && String(x).toLowerCase() !== 'nan') ? String(x).trim() : d; }
-function _nsu(x, d='SIN_VALOR') { const s = _ns(x,d); return (s===d||!s) ? d : s.toUpperCase(); }
-
-function _normStatus(x) {
-  let s = _ns(x,'por programar').toLowerCase();
-  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  return s.trim();
-}
-
-function _classifyStatus(estado) {
-  const s = _normStatus(estado);
-  if (_MOVABLE.some(m => s.includes(m)))   return 'movible';
-  if (_FINALIZED.some(f => s.includes(f))) return 'finalizado';
-  if (_IN_PROGRESS.some(p => s.includes(p))) return 'bloqueado';
-  if (_BLOCKED.some(b => s.includes(b)))   return 'bloqueado';
-  return 'desconocido';
-}
-
-function _normFranja(x) {
-  const s = _ns(x,'').replace(/[–—]/g,'-').trim();
-  if (!s) return 'Sin Franja';
-  const clean = s.replace(/\s/g,'');
-  for (const f of _FRANJAS) if (f.replace(/\s/g,'') === clean) return f;
-  return s;
-}
-
-function _parseFranjaHours(f) {
-  if (!f || f === 'Sin Franja') return [null, null];
-  const parts = f.replace(/[–—]/g,'-').split('-');
-  if (parts.length < 2) return [null, null];
-  const pt = t => { const m = t.trim().match(/(\d+):(\d+)/); return m ? parseInt(m[1]) + parseInt(m[2])/60 : null; };
-  return [pt(parts[0]), pt(parts[1])];
-}
-
-// Detección automática de columnas del Excel
-function _buildColMap(headers) {
-  const find = (...aliases) => {
-    for (const a of aliases) {
-      const found = headers.find(c => c && c.toLowerCase().trim() === a.toLowerCase());
-      if (found) return found;
-    }
-    return null;
-  };
-  return {
-    id:         find('appointment_id','id_orden','id','orden','order_id','appt_id'),
-    tecnico:    find('tecnico','technician','técnico','tech','nombre tecnico','nombre_tecnico','assignee'),
-    estado:     find('status_txt','status','estado','appointment_status','estado orden','estado_orden'),
-    franja:     find('franja_label','franja','slot','franja horaria','horario','time_slot','hora'),
-    tipo:       find('appointment_type_txt','category','categoria','tipo','tipo_trabajo','type','work_type'),
-    zona:       find('zone name','zone_name','zona','zone','cities__name','cities_name','ciudad'),
-    subzona:    find('subzone','subzona','sub_zona','sector'),
-    direccion:  find('addresses__address','addresses_address','address','direccion','dirección','address_street'),
-    lat:        find('latitude','lat','latitud'),
-    lon:        find('longitude','lon','longitud'),
-    updated_at: find('onsite_at_cot','updated at','updated_at','fecha actualizacion','last_update','fecha_actualizacion'),
-    supervisor: find('supervisor','jefe','team_lead'),
-    gmaps:      find('google maps link','gmaps','maps_link','google_maps'),
-    ciudad:     find('cities__name','cities_name','ciudad'),
-  };
-}
-
-function _normOrder(row, cm) {
-  const g = k => cm[k] ? _ns(row[cm[k]],'') : '';
-  const gf = k => { try { const v = cm[k] ? row[cm[k]] : null; return v != null && v !== '' ? parseFloat(v)||0 : 0; } catch(e){ return 0; } };
-  const id = g('id') || `sid_${Math.random().toString(36).slice(2)}`;
-  const tecnico = g('tecnico') || 'SIN_ASIGNAR';
-  const estado  = g('estado')  || 'por programar';
-  const franja  = _normFranja(g('franja'));
-  const zona    = _nsu(g('zona') || g('ciudad'),'SIN_ZONA') || 'SIN_ZONA';
-  const tipo    = (g('tipo') || 'instalacion').toLowerCase();
-  const lat = gf('lat'), lon = gf('lon');
-  const clase = _classifyStatus(estado);
-  return {
-    id, tecnico, estado, franja, tipo, zona,
-    subzona:    _nsu(g('subzona'),'SIN_SUBZONA'),
-    direccion:  g('direccion'),
-    lat, lon,
-    updated_at: g('updated_at'),
-    supervisor: g('supervisor'),
-    gmaps:      g('gmaps'),
-    estado_clase: clase,
-    movible: clase === 'movible',
-    _source: 'excel_desktop',
-  };
-}
-
-function _parseDateMin(updatedAt) {
-  if (!updatedAt) return null;
-  try { return new Date(updatedAt); } catch(e){ return null; }
-}
-
-function _minutesSince(updatedAt) {
-  const d = _parseDateMin(updatedAt); if (!d) return null;
-  return (Date.now() - d.getTime()) / 60000;
-}
-
-function runLevelingJS(rawOrders) {
-  const now = new Date();
-  const nowH = now.getHours() + now.getMinutes()/60;
-  const orders = rawOrders;
-
-  // ── Agrupar por técnico
-  const byTech = {};
-  for (const o of orders) {
-    const t = o.tecnico || 'SIN_ASIGNAR';
-    if (!byTech[t]) byTech[t] = [];
-    byTech[t].push(o);
-  }
-
-  // ── Carga por técnico
-  const carga_por_tecnico = Object.entries(byTech).map(([tecnico, ords]) => {
-    const movibles    = ords.filter(o => o.movible).length;
-    const activas     = ords.filter(o => _IN_PROGRESS.some(p => _normStatus(o.estado).includes(p))).length;
-    const finalizadas = ords.filter(o => _FINALIZED.some(f => _normStatus(o.estado).includes(f))).length;
-    const total       = ords.length;
-    const sobrecarga  = total > MAX_IDEAL && tecnico !== 'SIN_ASIGNAR';
-    const franjas     = {};
-    ords.forEach(o => { franjas[o.franja] = (franjas[o.franja]||0)+1; });
-    const zona = ords[0]?.zona || 'SIN_ZONA';
-    return { tecnico, zona, total, movibles, activas, finalizadas, bloqueadas: total-movibles, sobrecarga, franjas };
-  }).sort((a,b) => b.total - a.total);
-
-  // ── Carga por franja
-  const byFranja = {};
-  for (const o of orders) {
-    const f = o.franja || 'Sin Franja';
-    if (!byFranja[f]) byFranja[f] = { total:0, movibles:0, bloqueadas:0, techs: new Set() };
-    byFranja[f].total++;
-    if (o.movible) byFranja[f].movibles++; else byFranja[f].bloqueadas++;
-    byFranja[f].techs.add(o.tecnico);
-  }
-  const carga_por_franja = Object.entries(byFranja).map(([franja, d]) => ({
-    franja, total: d.total, movibles: d.movibles, bloqueadas: d.bloqueadas,
-    tecnicos: d.techs.size, sobrecarga: d.total > MAX_ABS,
-  })).sort((a,b) => {
-    const [s1] = _parseFranjaHours(a.franja);
-    const [s2] = _parseFranjaHours(b.franja);
-    return (s1||99) - (s2||99);
-  });
-
-  // ── Alertas
-  const alertas = [];
-
-  // Sobrecarga por técnico
-  for (const t of carga_por_tecnico) {
-    if (t.sobrecarga && t.tecnico !== 'SIN_ASIGNAR') {
-      alertas.push({
-        tipo: 'SOBRECARGA_TOTAL', severidad: 'alta',
-        tecnico: t.tecnico, franja: null,
-        detalle: `${t.tecnico} tiene ${t.total} órdenes (máx ideal: ${MAX_IDEAL})`,
-      });
-    }
-  }
-
-  // En sitio prolongado / bloqueadas con tiempo
-  for (const o of orders) {
-    const s = _normStatus(o.estado);
-    if (s.includes('en sitio')) {
-      const mins = _minutesSince(o.updated_at);
-      if (mins !== null && mins > ONSITE_MIN) {
-        alertas.push({
-          tipo: 'EN_SITIO_PROLONGADO', severidad: 'critica',
-          tecnico: o.tecnico, franja: o.franja,
-          detalle: `Orden ${o.id} — ${o.tecnico} lleva ~${Math.round(mins)} min en sitio`,
-          orden: o.id,
-        });
-      }
-    }
-  }
-
-  // Sin técnico asignado
-  const sinTecnico = orders.filter(o => o.movible && (o.tecnico==='SIN_ASIGNAR'||!o.tecnico));
-  if (sinTecnico.length) {
-    alertas.push({
-      tipo: 'SIN_TECNICO', severidad: 'alta', tecnico: null, franja: null,
-      detalle: `${sinTecnico.length} orden(es) movible(s) sin técnico asignado`,
-    });
-  }
-
-  // Sin franja
-  const sinFranja = orders.filter(o => o.movible && (!o.franja || o.franja==='Sin Franja'));
-  if (sinFranja.length) {
-    alertas.push({
-      tipo: 'SIN_FRANJA', severidad: 'media', tecnico: null, franja: null,
-      detalle: `${sinFranja.length} orden(es) movible(s) sin franja horaria`,
-    });
-  }
-
-  // Franjas sobrecargadas
-  for (const f of carga_por_franja) {
-    if (f.sobrecarga) {
-      alertas.push({
-        tipo: 'SOBRECARGA_FRANJA', severidad: 'alta', tecnico: null, franja: f.franja,
-        detalle: `Franja ${f.franja} tiene ${f.total} órdenes (máx: ${MAX_ABS})`,
-      });
-    }
-  }
-
-  // ── Sugerencias: mover órdenes de técnicos sobrecargados a técnicos con capacidad
-  const sugerencias = [];
-  const techMap = Object.fromEntries(carga_por_tecnico.map(t => [t.tecnico, t]));
-  const sobrecargados = carga_por_tecnico.filter(t => t.sobrecarga && t.tecnico !== 'SIN_ASIGNAR');
-  const conCapacidad  = carga_por_tecnico.filter(t => t.total < MAX_IDEAL && t.tecnico !== 'SIN_ASIGNAR');
-
-  for (const tech of sobrecargados) {
-    const moviblesDelTech = orders.filter(o => o.tecnico === tech.tecnico && o.movible);
-    const exceso = tech.total - MAX_IDEAL;
-    let movidas = 0;
-    for (const orden of moviblesDelTech) {
-      if (movidas >= exceso) break;
-      // Buscar receptor de la misma zona preferiblemente
-      const receptor = conCapacidad.find(t =>
-        t.tecnico !== tech.tecnico &&
-        (t.zona === tech.zona || true) // acepta cualquier zona si no hay misma zona
-      );
-      if (!receptor) continue;
-      const score = Math.round(100 - (receptor.total / MAX_IDEAL)*100);
-      sugerencias.push({
-        orden: orden.id,
-        tecnico_actual: tech.tecnico,
-        tecnico_sugerido: receptor.tecnico,
-        franja_actual: orden.franja,
-        franja_sugerida: orden.franja,
-        tipo: orden.tipo,
-        estado: orden.estado,
-        zona: orden.zona,
-        motivo: `${tech.tecnico} tiene ${tech.total} órdenes. ${receptor.tecnico} tiene ${receptor.total}.`,
-        beneficio: `Reduce carga de ${tech.tecnico} y balancea la operación`,
-        riesgo: receptor.zona !== tech.zona ? 'alto' : 'bajo',
-        score: Math.max(score, 10),
-        interzona: receptor.zona !== tech.zona,
-        bloqueos: [],
-      });
-      // Actualizar contadores en memoria para no sobre-sugerir
-      receptor.total++;
-      tech.total--;
-      movidas++;
-    }
-  }
-  sugerencias.sort((a,b) => b.score - a.score);
-
-  // ── Resumen
-  const movibles   = orders.filter(o => o.movible);
-  const bloqueadas = orders.filter(o => !o.movible);
-  const techsSobre = carga_por_tecnico.filter(t => t.sobrecarga && t.tecnico !== 'SIN_ASIGNAR').length;
-
-  const resumen = {
-    total_ordenes:         orders.length,
-    movibles:              movibles.length,
-    bloqueadas:            bloqueadas.length,
-    alertas:               alertas.length,
-    alertas_criticas:      alertas.filter(a => a.severidad === 'critica').length,
-    sugerencias:           sugerencias.length,
-    tecnicos_total:        carga_por_tecnico.filter(t => t.tecnico !== 'SIN_ASIGNAR').length,
-    tecnicos_sobrecargados: techsSobre,
-    sin_tecnico:           sinTecnico.length,
-    sin_franja:            sinFranja.length,
-  };
-
-  return {
-    resumen,
-    carga_por_tecnico,
-    carga_por_franja,
-    ordenes_movibles:  movibles,
-    ordenes_bloqueadas: bloqueadas,
-    alertas,
-    sugerencias,
-    intercambios: [],
-    generado_en: now.toLocaleString('es-CO'),
-    fuente: 'excel_desktop',
-  };
-}
-
-// Procesar archivo Excel en modo escritorio (sin servidor)
-async function processExcelDesktop(file) {
-  return new Promise((resolve, reject) => {
-    if (typeof XLSX === 'undefined') {
-      reject(new Error('SheetJS no cargó. Verifica conexión a internet la primera vez.'));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = e => {
-      try {
-        const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
-        if (!rows.length) { reject(new Error('El archivo está vacío o sin datos')); return; }
-        const headers = Object.keys(rows[0]);
-        const cm = _buildColMap(headers);
-        const orders = rows.map(r => _normOrder(r, cm)).filter(o => o.id);
-        resolve(runLevelingJS(orders));
-      } catch(err) { reject(err); }
-    };
-    reader.onerror = () => reject(new Error('Error leyendo el archivo'));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
 // ── API calls ──
 async function api(url, opts={}){
   const r = await fetch(url, opts);
@@ -931,19 +628,12 @@ async function api(url, opts={}){
 }
 
 async function loadData(){
-  // Modo escritorio: no hay servidor, mostrar pantalla de carga de Excel
   if(DESKTOP_MODE){
-    const waitMsg = `<div class="no-data"><div class="icon">📂</div><div style="font-weight:600">Modo Escritorio</div><div style="font-size:12px;color:var(--text3);margin-top:6px">Sube tu archivo Excel con el botón 📂 de la barra superior<br>para comenzar el análisis sin necesidad de servidor.</div></div>`;
-    document.getElementById('cards-resumen').innerHTML = waitMsg;
-    document.getElementById('tech-grid').innerHTML = waitMsg;
-    document.getElementById('franja-grid').innerHTML = waitMsg;
-    document.getElementById('resumen-franjas').innerHTML = '';
-    document.getElementById('last-update').textContent = '🖥 Modo escritorio';
-    // Ocultar botón Actualizar y Sheets en modo escritorio
-    const rb = document.getElementById('refresh-btn');
-    if(rb) rb.style.display='none';
-    const sb = document.getElementById('sheets-btn');
-    if(sb) sb.style.display='none';
+    const m='<div class="no-data"><div class="icon">📂</div><div style="font-weight:600">Modo Escritorio</div><div style="font-size:12px;color:var(--text3);margin-top:6px">Sube tu Excel con el botón 📂 de arriba.</div></div>';
+    ['cards-resumen','tech-grid','franja-grid'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=m;});
+    const lu=document.getElementById('last-update');if(lu)lu.textContent='🖥 Modo escritorio';
+    const rb=document.getElementById('refresh-btn');if(rb)rb.style.display='none';
+    const sb=document.getElementById('sheets-btn');if(sb)sb.style.display='none';
     return;
   }
   try {
@@ -991,19 +681,14 @@ async function refreshData(){
 
 async function uploadExcel(input){
   const file = input.files[0]; if(!file) return;
-  // Modo escritorio: procesar en el navegador sin servidor
   if(DESKTOP_MODE){
-    try {
+    try{
       toast('Procesando Excel...');
-      const result = await processExcelDesktop(file);
-      DATA = result;
-      renderAll();
-      document.getElementById('last-update').textContent = '🖥 ' + (DATA.generado_en||'—') + ' (escritorio)';
-      toast(`✓ ${DATA.resumen.total_ordenes} órdenes cargadas desde Excel`);
-    } catch(e){
-      toast('Error: '+e.message, 'error');
-      console.error(e);
-    }
+      const result=await processExcelDesktop(file);
+      DATA=result; renderAll();
+      document.getElementById('last-update').textContent='🖥 '+(DATA.generado_en||'');
+      toast('✓ '+DATA.resumen.total_ordenes+' órdenes cargadas');
+    }catch(e){toast('Error: '+e.message,'error');}
     input.value=''; return;
   }
   const fd = new FormData(); fd.append('file', file);
@@ -1021,8 +706,7 @@ async function uploadExcel(input){
 // ── Render All ──
 function renderAll(){
   if(!DATA) return;
-  buildAnalistaOptions();
-  updateAnalistaUI();
+  buildAnalistaOptions(); updateAnalistaUI();
   renderResumen();
   renderTecnicos();
   renderFranjas();
@@ -1124,8 +808,7 @@ function renderTecnicos(){
   const zonaFilt = (document.getElementById('filter-tech-zona').value||'').toUpperCase();
   const sFilter = document.getElementById('filter-tech-sobrecarga').value;
   let techs = DATA.carga_por_tecnico||[];
-  // Filtro global de analista
-  if(TECH_FILTER.size) techs = techs.filter(t=>TECH_FILTER.has(t.tecnico));
+  if(TECH_FILTER.size) techs=techs.filter(t=>TECH_FILTER.has(t.tecnico));
   if(search) techs = techs.filter(t=>t.tecnico.toLowerCase().includes(search));
   if(zonaFilt) techs = techs.filter(t=>(t.zona||'').toUpperCase()===zonaFilt);
   if(sFilter==='sobrecarga') techs = techs.filter(t=>t.sobrecarga && t.tecnico!=='SIN_ASIGNAR');
@@ -1199,5 +882,448 @@ function renderFranjas(){
   // Tabla detalle
   const tbody = document.querySelector('#franja-detail-table tbody');
   let rows='';
-  let detalleTechs = DATA.carga_por_tecnico||[];
-  if(TECH_FILTER.size) detalleTechs = detalleTechs.filter(t=>TECH_
+  (DATA.carga_por_tecnico||[]).forEach(t=>{
+    Object.entries(t.franjas||{}).forEach(([f,c])=>{
+      rows+=`<tr><td>${esc(f)}</td><td>${esc(t.tecnico)}</td><td>${t.total}</td><td style="color:var(--green)">${t.movibles}</td><td>${t.bloqueadas}</td></tr>`;
+    });
+  });
+  tbody.innerHTML=rows||`<tr class="empty-row"><td colspan="5">Sin datos</td></tr>`;
+}
+
+// ── Movibles ──
+function renderMovibles(){
+  if(!DATA) return;
+  let orders = DATA.ordenes_movibles||[];
+  if(TECH_FILTER.size) orders=orders.filter(o=>TECH_FILTER.has(o.tecnico));
+  const tech   = document.getElementById('f-mov-tech').value;
+  const franja = document.getElementById('f-mov-franja').value;
+  const tipo   = document.getElementById('f-mov-tipo').value;
+  const search = (document.getElementById('f-mov-search').value||'').toLowerCase();
+  if(tech)   orders=orders.filter(o=>o.tecnico===tech);
+  if(franja) orders=orders.filter(o=>o.franja===franja);
+  if(tipo)   orders=orders.filter(o=>o.tipo===tipo);
+  if(search) orders=orders.filter(o=>
+    String(o.id).toLowerCase().includes(search)||
+    (o.direccion||'').toLowerCase().includes(search)||
+    (o.tecnico||'').toLowerCase().includes(search)
+  );
+  document.getElementById('mov-count').textContent=orders.length;
+  const tbody=document.getElementById('movibles-tbody');
+  if(!orders.length){ tbody.innerHTML=`<tr class="empty-row"><td colspan="8">Sin órdenes movibles con estos filtros</td></tr>`; return; }
+  tbody.innerHTML=orders.map(o=>`
+    <tr>
+      <td><strong>${esc(o.id)}</strong></td>
+      <td>${esc(o.tecnico)}</td>
+      <td>${statusBadge(o.estado, o.estado_clase)}</td>
+      <td><span class="tag">⏰ ${esc(o.franja)}</span></td>
+      <td><span class="tag">${esc(o.tipo)}</span></td>
+      <td>${esc(o.zona)}</td>
+      <td>${esc(o.subzona)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.direccion)}">${esc(o.direccion)||'—'}</td>
+    </tr>`).join('');
+}
+
+// ── Bloqueadas ──
+function renderBloqueadas(){
+  if(!DATA) return;
+  let orders = DATA.ordenes_bloqueadas||[];
+  if(TECH_FILTER.size) orders=orders.filter(o=>TECH_FILTER.has(o.tecnico));
+  const tech   = document.getElementById('f-blq-tech').value;
+  const estado = document.getElementById('f-blq-estado').value;
+  if(tech)   orders=orders.filter(o=>o.tecnico===tech);
+  if(estado) orders=orders.filter(o=>o.estado===estado);
+  document.getElementById('blq-count').textContent=orders.length;
+  const tbody=document.getElementById('bloqueadas-tbody');
+  if(!orders.length){ tbody.innerHTML=`<tr class="empty-row"><td colspan="8">Sin órdenes bloqueadas</td></tr>`; return; }
+  tbody.innerHTML=orders.map(o=>{
+    const motivo = o.estado_clase==='avanzado'?'Orden avanzada (no mover)':
+                   o.estado_clase==='finalizado'?'Finalizada / cerrada':
+                   (o.estado||'').toLowerCase().includes('en camino')?'Técnico en camino':
+                   (o.estado||'').toLowerCase().includes('en sitio')?'Técnico en sitio':'Bloqueada';
+    return `
+    <tr>
+      <td><strong>${esc(o.id)}</strong></td>
+      <td>${esc(o.tecnico)}</td>
+      <td>${statusBadge(o.estado, o.estado_clase)}</td>
+      <td><span class="tag">⏰ ${esc(o.franja)}</span></td>
+      <td><span class="tag">${esc(o.tipo)}</span></td>
+      <td>${esc(o.zona)}</td>
+      <td style="font-size:11px;color:var(--text3)">${esc(o.updated_at)||'—'}</td>
+      <td style="font-size:12px;color:var(--text3)">${esc(motivo)}</td>
+    </tr>`;}).join('');
+}
+
+// ── Alertas ──
+function renderAlertas(){
+  if(!DATA) return;
+  let alertas = DATA.alertas||[];
+  if(TECH_FILTER.size) alertas=alertas.filter(a=>!a.tecnico||TECH_FILTER.has(a.tecnico));
+  const sev  = document.getElementById('f-alert-sev').value;
+  const tipo = document.getElementById('f-alert-tipo').value;
+  if(sev)  alertas=alertas.filter(a=>a.severidad===sev);
+  if(tipo) alertas=alertas.filter(a=>a.tipo===tipo);
+  alertas.sort((a,b)=>{
+    const order={critica:0,alta:1,media:2};
+    return (order[a.severidad]||9)-(order[b.severidad]||9);
+  });
+  document.getElementById('alert-count').textContent=alertas.length;
+  const list=document.getElementById('alertas-list');
+  if(!alertas.length){ list.innerHTML=`<div class="no-data"><div class="icon">🔔</div><div>Sin alertas activas</div></div>`; return; }
+  list.innerHTML=alertas.map(a=>`
+    <div class="alert-item alert-${a.severidad||'media'}">
+      <span class="alert-icon">${ALERT_ICON[a.tipo]||'⚠️'}</span>
+      <div class="alert-body">
+        <div class="title">${esc(a.tipo||'').replace(/_/g,' ')}</div>
+        <div class="detail">${esc(a.detalle)}</div>
+        ${a.tecnico?`<div style="font-size:11px;color:var(--text3);margin-top:2px">👷 ${esc(a.tecnico)} ${a.franja?'· ⏰ '+esc(a.franja):''}</div>`:''}
+      </div>
+      <span class="alert-badge">${esc(a.severidad||'media').toUpperCase()}</span>
+    </div>`).join('');
+}
+
+// ── Sugerencias ──
+function renderSugerencias(){
+  if(!DATA) return;
+  let sugs = DATA.sugerencias||[];
+  if(TECH_FILTER.size) sugs=sugs.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
+  const estadoFilt = document.getElementById('f-sug-estado').value;
+  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
+  const riesgoFilt = document.getElementById('f-sug-riesgo').value;
+
+  sugs = sugs.map(s=>({...s, sessionStatus: SESSION.applied[s.orden]?'aplicada': SESSION.dismissed[s.orden]?'descartada':'pendiente'}));
+  if(estadoFilt!=='todas') sugs=sugs.filter(s=>s.sessionStatus===estadoFilt);
+  if(zonaFilt) sugs=sugs.filter(s=>(s.zona||'').toUpperCase()===zonaFilt);
+  if(riesgoFilt) sugs=sugs.filter(s=>s.riesgo===riesgoFilt);
+  // Filtro de exclusión local (no afecta el backend)
+  if(EXCLUIDOS_SUGS.size) sugs=sugs.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
+
+  document.getElementById('sug-count').textContent=sugs.length;
+  const list=document.getElementById('sugerencias-list');
+  if(!sugs.length){ list.innerHTML=`<div class="no-data"><div class="icon">💡</div><div>Sin sugerencias ${estadoFilt==='pendiente'?'pendientes':estadoFilt}</div></div>`; return; }
+
+  // Agrupar por zona
+  const byZona={};
+  sugs.forEach(s=>{ const z=s.zona||'SIN_ZONA'; if(!byZona[z]) byZona[z]=[]; byZona[z].push(s); });
+
+  let html='';
+  Object.keys(byZona).sort().forEach(zona=>{
+    const zsugs=byZona[zona];
+    html+=`<div class="section-title" style="margin-top:16px;margin-bottom:8px">
+      📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${zsugs.length} sugerencia${zsugs.length!==1?'s':''}</span>
+    </div><div class="sug-grid">`;
+    zsugs.forEach(s=>{
+      const isApplied=s.sessionStatus==='aplicada';
+      const isDismissed=s.sessionStatus==='descartada';
+      const techFrom=s.tecnico_actual||'SIN ASIGNAR';
+      const techTo=s.tecnico_sugerido||'';
+      html+=`
+      <div class="sug-mini-card ${isApplied?'aplicada':isDismissed?'descartada':s.riesgo==='alto'?'riesgo-alto':''}" id="sug-${esc(s.orden)}">
+        <div class="sug-mini-top">
+          <span class="sug-orden-mini">📋 ${esc(s.orden)}</span>
+          <span class="sug-score-mini">⭐ ${s.score}</span>
+        </div>
+        <div class="sug-mini-tipo">
+          <span class="tag" style="font-size:10px">${esc(s.tipo)}</span>
+          ${s.interzona?'<span class="tag" style="font-size:10px;color:var(--orange);border-color:var(--orange)">🗺 Interzona</span>':''}
+          ${isApplied?'<span class="tag" style="font-size:10px;color:var(--green)">✓ Aplicada</span>':''}
+          ${isDismissed?'<span class="tag" style="font-size:10px;color:var(--text3)">— Descartada</span>':''}
+        </div>
+        <div class="sug-mini-arrow">
+          <span class="sug-tech-from" title="${esc(techFrom)}">${esc(techFrom)}</span>
+          <span style="color:var(--blue);font-weight:700">→</span>
+          <span class="sug-tech-to" title="${esc(techTo)}">${esc(techTo)}</span>
+        </div>
+        <div class="sug-mini-franja">⏰ ${esc(s.franja_actual)}${s.franja_sugerida&&s.franja_sugerida!==s.franja_actual?' → <strong>'+esc(s.franja_sugerida)+'</strong>':''}</div>
+        <div class="sug-mini-riesgo">${riskBadge(s.riesgo)} ${esc((s.beneficio||'').substring(0,55))}${(s.beneficio||'').length>55?'…':''}</div>
+        <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,80))}${(s.motivo||'').length>80?'…':''}</div>
+        <div class="sug-mini-actions">
+          ${!isApplied?`<button class="btn btn-sm btn-green" onclick="sugAccion('${esc(s.orden)}','aplicar')">✓ Aplicar</button>`:''}
+          ${!isDismissed?`<button class="btn btn-sm btn-red" onclick="sugAccion('${esc(s.orden)}','descartar')">✕</button>`:''}
+          ${(isApplied||isDismissed)?`<button class="btn btn-sm btn-ghost" onclick="sugAccion('${esc(s.orden)}','revertir')">↩</button>`:''}
+          <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:10px" title="Excluir ${esc(techFrom)} de sugerencias" onclick="excAddFromSug('${esc(techFrom)}')">🚫 Excluir</button>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  });
+  list.innerHTML=html;
+}
+
+function renderIntercambios(){
+  if(!DATA) return;
+  const intercambios = DATA.intercambios||[];
+  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
+  const estadoFilt = document.getElementById('f-sug-estado').value;
+
+  let list_data = intercambios;
+  if(TECH_FILTER.size) list_data=list_data.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
+  if(zonaFilt) list_data = list_data.filter(s=>(s.zona||'').toUpperCase()===zonaFilt || (s.zona_b||'').toUpperCase()===zonaFilt);
+  if(EXCLUIDOS_SUGS.size) list_data = list_data.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
+  if(estadoFilt==='aplicada') list_data = list_data.filter(s=>SESSION.applied['INT_'+s.orden+'_'+s.orden_b]);
+  else if(estadoFilt==='descartada') list_data = list_data.filter(s=>SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
+  else if(estadoFilt==='pendiente') list_data = list_data.filter(s=>!SESSION.applied['INT_'+s.orden+'_'+s.orden_b] && !SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
+
+  document.getElementById('int-count').textContent = list_data.length;
+  const container = document.getElementById('intercambios-list');
+  const header = document.getElementById('intercambios-header');
+  if(!list_data.length){
+    container.innerHTML = `<div class="no-data" style="padding:14px 0"><div class="icon">🔄</div><div>Sin intercambios sugeridos con los filtros actuales</div></div>`;
+    header.style.display = intercambios.length ? '' : 'none';
+    return;
+  }
+  header.style.display = '';
+
+  // Agrupar por zona (igual que sugerencias individuales)
+  const byZona = {};
+  list_data.forEach(s=>{
+    const z = s.zona||s.zona_b||'SIN_ZONA';
+    if(!byZona[z]) byZona[z]=[];
+    byZona[z].push(s);
+  });
+
+  let html = '';
+  Object.keys(byZona).sort().forEach(zona=>{
+    const items = byZona[zona];
+    html += `<div class="section-title" style="margin-top:16px;margin-bottom:8px">
+      📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${items.length} intercambio${items.length!==1?'s':''}</span>
+    </div><div class="sug-grid">`;
+    items.forEach(s=>{
+      const key = 'INT_'+s.orden+'_'+s.orden_b;
+      const isApplied = !!SESSION.applied[key];
+      const isDismissed = !!SESSION.dismissed[key];
+      const saving = s.dist_saving_km ? ` · 📍-${s.dist_saving_km}km` : '';
+      html += `
+      <div class="sug-mini-card intercambio ${isApplied?'aplicada':isDismissed?'descartada':''}" id="int-${esc(String(s.orden))}">
+        <div class="sug-mini-top">
+          <span class="swap-badge">🔄 INTERCAMBIO</span>
+          <span class="sug-score-mini">⭐ ${s.score}</span>
+        </div>
+        <div class="sug-mini-tipo">
+          <span class="tag" style="font-size:10px">${esc(s.tipo)}</span>
+          ${riskBadge(s.riesgo)}
+          ${isApplied?'<span class="tag" style="font-size:10px;color:var(--green)">✓ Aplicado</span>':''}
+          ${isDismissed?'<span class="tag" style="font-size:10px;color:var(--text3)">— Descartado</span>':''}
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:1px 0">Orden <strong>${esc(String(s.orden))}</strong> (zona ${esc(s.zona||'?')})</div>
+        <div class="sug-mini-arrow">
+          <span class="sug-tech-from" title="${esc(s.tecnico_actual)}">${esc(s.tecnico_actual)}</span>
+          <span style="color:var(--blue);font-weight:700;font-size:16px">⇄</span>
+          <span class="sug-tech-swap" title="${esc(s.tecnico_sugerido)}">${esc(s.tecnico_sugerido)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin:1px 0">Orden <strong>${esc(String(s.orden_b))}</strong> (zona ${esc(s.zona_b||'?')})</div>
+        <div class="sug-mini-riesgo">${esc((s.beneficio||'').substring(0,65))}${(s.beneficio||'').length>65?'…':''}${saving}</div>
+        <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,80))}${(s.motivo||'').length>80?'…':''}</div>
+        <div class="sug-mini-actions">
+          ${!isApplied?`<button class="btn btn-sm btn-green" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','aplicar')">✓ Aplicar</button>`:''}
+          ${!isDismissed?`<button class="btn btn-sm btn-red" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','descartar')">✕</button>`:''}
+          ${(isApplied||isDismissed)?`<button class="btn btn-sm btn-ghost" onclick="intAccion('${esc(String(s.orden))}','${esc(String(s.orden_b))}','revertir')">↩</button>`:''}
+          <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:10px" onclick="excAddFromSug('${esc(s.tecnico_actual)}')">🚫 Excluir</button>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  });
+  container.innerHTML = html;
+}
+
+function intAccion(orden, orden_b, accion){
+  const key = 'INT_'+orden+'_'+orden_b;
+  if(accion==='aplicar') SESSION.applied[key]=true, delete SESSION.dismissed[key];
+  else if(accion==='descartar') SESSION.dismissed[key]=true, delete SESSION.applied[key];
+  else delete SESSION.applied[key], delete SESSION.dismissed[key];
+  renderIntercambios();
+  const msgs={aplicar:'✓ Intercambio marcado como aplicado',descartar:'— Intercambio descartado',revertir:'↩ Revertido a pendiente'};
+  toast(msgs[accion]||'OK');
+}
+
+async function sugAccion(orden, accion){
+  try {
+    await api('/api/sugerencias/accion', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({orden, accion})
+    });
+    if(accion==='aplicar') SESSION.applied[orden]=true, delete SESSION.dismissed[orden];
+    else if(accion==='descartar') SESSION.dismissed[orden]=true, delete SESSION.applied[orden];
+    else delete SESSION.applied[orden], delete SESSION.dismissed[orden];
+    renderSugerencias();
+    const msgs={aplicar:'✓ Sugerencia marcada como aplicada',descartar:'— Sugerencia descartada',revertir:'↩ Revertida a pendiente'};
+    toast(msgs[accion]||'OK');
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+// ── Filtros dinámicos ──
+function populateFilters(){
+  if(!DATA) return;
+  const techs = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.tecnico))].sort();
+  const franjas = [...new Set((DATA.carga_por_franja||[]).map(f=>f.franja))];
+  const tipos = [...new Set([...(DATA.ordenes_movibles||[]),...(DATA.ordenes_bloqueadas||[])].map(o=>o.tipo).filter(Boolean))].sort();
+  const estados = [...new Set((DATA.ordenes_bloqueadas||[]).map(o=>o.estado))].sort();
+  const alertTipos = [...new Set((DATA.alertas||[]).map(a=>a.tipo))];
+
+  const fillSelect=(id, vals, cur)=>{
+    const el=document.getElementById(id); if(!el) return;
+    const prev=el.value||cur||'';
+    el.innerHTML=`<option value="">${el.options[0]?.text||'Todos'}</option>`+vals.map(v=>`<option value="${esc(v)}" ${v===prev?'selected':''}>${esc(v)}</option>`).join('');
+    el.value=prev;
+  };
+  const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
+  fillSelect('filter-tech-zona', zonas);
+  fillSelect('f-sug-zona',       zonas);
+  // Poblar dropdown de exclusión con todos los técnicos
+  const excSel = document.getElementById('f-sug-excluir-select');
+  if(excSel){
+    excSel.innerHTML=`<option value="">🚫 Excluir técnico...</option>`+techs.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  }
+  fillSelect('f-mov-tech',  techs);
+  fillSelect('f-mov-franja', franjas);
+  fillSelect('f-mov-tipo',   tipos);
+  fillSelect('f-blq-tech',   techs);
+  fillSelect('f-blq-estado', estados);
+  fillSelect('f-alert-tipo', alertTipos);
+}
+
+// ─── EXCLUIDOS EN SUGERENCIAS (filtro local de vista) ───────────────────────
+const EXCLUIDOS_SUGS = new Set();
+
+function excluirTecnicoSug(){
+  const sel = document.getElementById('f-sug-excluir-select');
+  if(!sel||!sel.value) return;
+  const nombre = sel.value;
+  EXCLUIDOS_SUGS.add(nombre);
+  sel.value='';
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+}
+
+function quitarExcluidoSug(nombre){
+  EXCLUIDOS_SUGS.delete(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+}
+
+function renderExcluidosPills(){
+  const container = document.getElementById('excluidos-pills');
+  if(!container) return;
+  if(!EXCLUIDOS_SUGS.size){ container.innerHTML=''; return; }
+  container.innerHTML=[...EXCLUIDOS_SUGS].map(n=>
+    `<span class="excluido-pill">🚫 ${esc(n)} <button onclick="quitarExcluidoSug('${esc(n)}')" title="Quitar">x</button></span>`
+  ).join('');
+}
+
+function excAddFromSug(nombre){
+  if(!nombre) return;
+  EXCLUIDOS_SUGS.add(nombre);
+  renderExcluidosPills();
+  renderSugerencias();
+  renderIntercambios();
+  toast(`🚫 "${nombre}" excluido de sugerencias`);
+}
+
+// ─── Lista negra / Excepciones ───────────────────────────────────────────────
+async function excAdd(){
+  const input = document.getElementById('exc-input');
+  const nombre = (input?.value||'').trim();
+  if(!nombre){ toast('Escribe el nombre del tecnico','error'); return; }
+  try {
+    await api('/api/blacklist/add', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
+    input.value='';
+    toast(`🚫 "${nombre}" agregado a excepciones`);
+    const data = await api('/api/blacklist');
+    renderExcList(data.blacklist||[]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+async function excClear(){
+  if(!confirm('Limpiar todas las excepciones?')) return;
+  try {
+    await api('/api/blacklist/clear', {method:'POST'});
+    toast('Lista de excepciones limpiada');
+    renderExcList([]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+function renderExcList(list){
+  const el = document.getElementById('exc-list');
+  document.getElementById('exc-count').textContent = list.length;
+  if(!list.length){
+    el.innerHTML='<div class="no-data"><div class="icon">🚫</div><div>Sin excepciones activas</div></div>';
+    return;
+  }
+  el.innerHTML = list.map(n=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
+      <span>🚫 ${esc(n)}</span>
+      <button class="btn btn-sm btn-ghost" style="margin-left:auto" onclick="excRemove('${esc(n)}')">Quitar</button>
+    </div>`).join('');
+}
+
+async function excRemove(nombre){
+  try {
+    await api('/api/blacklist/remove', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nombre})});
+    toast(`"${nombre}" quitado de excepciones`);
+    const data = await api('/api/blacklist');
+    renderExcList(data.blacklist||[]);
+  } catch(e){ toast('Error: '+e.message,'error'); }
+}
+
+// ─── Informe Diario / Exportar a Google Sheets ───────────────────────────────
+const EXPORT_LOG = [];
+
+async function exportarASheets(){
+  if(!DATA||!DATA.resumen||DATA.resumen.total_ordenes===0){
+    toast('Sube primero el Excel para exportar','error'); return;
+  }
+  const btns = ['sheets-btn','sheets-btn2'].map(id=>document.getElementById(id)).filter(Boolean);
+  const statuses = ['sheets-status','sheets-status2'].map(id=>document.getElementById(id)).filter(Boolean);
+  btns.forEach(b=>b.disabled=true);
+  statuses.forEach(s=>s.textContent='Exportando...');
+  try {
+    await api('/api/export-sheets', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({data: DATA})
+    });
+    const now = new Date().toLocaleTimeString('es-CO');
+    EXPORT_LOG.unshift({hora:now, ordenes:DATA.resumen.total_ordenes, status:'OK'});
+    statuses.forEach(s=>s.textContent='Exportado a las '+now);
+    toast('Datos exportados a Google Sheets');
+    informeLoad();
+  } catch(e){
+    const now = new Date().toLocaleTimeString('es-CO');
+    EXPORT_LOG.unshift({hora:now, ordenes:0, status:'Error: '+e.message});
+    statuses.forEach(s=>s.textContent='Error: '+e.message);
+    toast('Error al exportar: '+e.message,'error');
+  } finally {
+    btns.forEach(b=>b.disabled=false);
+  }
+}
+
+function informeLoad(){
+  const list = document.getElementById('informe-list');
+  if(!list) return;
+  document.getElementById('informe-count').textContent = EXPORT_LOG.length;
+  if(!EXPORT_LOG.length){
+    list.innerHTML='<div class="no-data"><div class="icon">📊</div><div>Sin exportaciones — sube el Excel y presiona Exportar a Sheets</div></div>';
+    return;
+  }
+  list.innerHTML = EXPORT_LOG.map(e=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px">
+      <span style="font-size:18px">${e.status==='OK'?'OK':'ERR'}</span>
+      <div>
+        <div style="font-weight:600;font-size:13px">${e.status==='OK'?e.ordenes+' ordenes exportadas':esc(e.status)}</div>
+        <div style="font-size:11px;color:var(--text3)">Exportado a las ${e.hora}</div>
+      </div>
+    </div>`).join('');
+}
+
+
+// Modo escritorio: mostrar bienvenida al abrir sin servidor
+if(DESKTOP_MODE){ window.addEventListener('DOMContentLoaded', loadData); }
+// Modo servidor: sin autoload, usuario sube Excel manualmente
+
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</body>
+</html>

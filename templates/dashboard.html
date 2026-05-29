@@ -630,7 +630,7 @@ function _nsu(x, d='SIN_VALOR') { const s = _ns(x,d); return (s===d||!s) ? d : s
 
 function _normStatus(x) {
   let s = _ns(x,'por programar').toLowerCase();
-  s = s.normalize('NFD').replace(/[̀-ͯ]/g,'');
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return s.trim();
 }
 
@@ -661,28 +661,28 @@ function _parseFranjaHours(f) {
 
 // Detección automática de columnas del Excel
 function _buildColMap(headers) {
-  const h = headers.map(c => (c||'').toLowerCase().trim());
   const find = (...aliases) => {
     for (const a of aliases) {
-      const i = headers.findIndex(c => c && c.toLowerCase().trim() === a.toLowerCase());
-      if (i >= 0) return headers[i];
+      const found = headers.find(c => c && c.toLowerCase().trim() === a.toLowerCase());
+      if (found) return found;
     }
     return null;
   };
   return {
     id:         find('appointment_id','id_orden','id','orden','order_id','appt_id'),
-    tecnico:    find('technician','tecnico','técnico','tech','nombre tecnico','nombre_tecnico','assignee'),
-    estado:     find('status','estado','appointment_status','estado orden','estado_orden'),
-    franja:     find('slot','franja','franja horaria','horario','time_slot','hora'),
-    tipo:       find('category','categoria','tipo','tipo_trabajo','type','work_type'),
-    zona:       find('zone name','zone_name','zona','zone','ciudad'),
+    tecnico:    find('tecnico','technician','técnico','tech','nombre tecnico','nombre_tecnico','assignee'),
+    estado:     find('status_txt','status','estado','appointment_status','estado orden','estado_orden'),
+    franja:     find('franja_label','franja','slot','franja horaria','horario','time_slot','hora'),
+    tipo:       find('appointment_type_txt','category','categoria','tipo','tipo_trabajo','type','work_type'),
+    zona:       find('zone name','zone_name','zona','zone','cities__name','cities_name','ciudad'),
     subzona:    find('subzone','subzona','sub_zona','sector'),
-    direccion:  find('addresses_address','address','direccion','dirección','address_street'),
+    direccion:  find('addresses__address','addresses_address','address','direccion','dirección','address_street'),
     lat:        find('latitude','lat','latitud'),
     lon:        find('longitude','lon','longitud'),
-    updated_at: find('updated at','updated_at','fecha actualizacion','last_update','fecha_actualizacion'),
+    updated_at: find('onsite_at_cot','updated at','updated_at','fecha actualizacion','last_update','fecha_actualizacion'),
     supervisor: find('supervisor','jefe','team_lead'),
     gmaps:      find('google maps link','gmaps','maps_link','google_maps'),
+    ciudad:     find('cities__name','cities_name','ciudad'),
   };
 }
 
@@ -693,7 +693,7 @@ function _normOrder(row, cm) {
   const tecnico = g('tecnico') || 'SIN_ASIGNAR';
   const estado  = g('estado')  || 'por programar';
   const franja  = _normFranja(g('franja'));
-  const zona    = _nsu(g('zona'),'SIN_ZONA') || 'SIN_ZONA';
+  const zona    = _nsu(g('zona') || g('ciudad'),'SIN_ZONA') || 'SIN_ZONA';
   const tipo    = (g('tipo') || 'instalacion').toLowerCase();
   const lat = gf('lat'), lon = gf('lon');
   const clase = _classifyStatus(estado);
@@ -1200,7 +1200,4 @@ function renderFranjas(){
   const tbody = document.querySelector('#franja-detail-table tbody');
   let rows='';
   let detalleTechs = DATA.carga_por_tecnico||[];
-  if(TECH_FILTER.size) detalleTechs = detalleTechs.filter(t=>TECH_FILTER.has(t.tecnico));
-  detalleTechs.forEach(t=>{
-    Object.entries(t.franjas||{}).forEach(([f,c])=>{
-      rows+=`<tr><td>
+  if(TECH_FILTER.size) detalleTechs = detalleTechs.filter(t=>TECH_

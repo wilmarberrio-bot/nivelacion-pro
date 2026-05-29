@@ -209,7 +209,12 @@ tr:hover td{background:var(--surface2)}
 /* Panel selección de técnicos por analista */
 .tech-select-wrap{display:flex;flex-direction:column;gap:4px;min-width:190px;max-width:230px}
 .tech-select-wrap>.ts-label{font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.tech-checklist{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);max-height:150px;overflow-y:auto;padding:4px 0}
+.tech-checklist{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);max-height:150px;overflow-y:auto;padding:4px 0;display:none;position:absolute;z-index:150;min-width:220px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.tech-checklist.open{display:block}
+.ts-toggle{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text2);padding:4px 12px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;width:100%;justify-content:space-between}
+.ts-toggle:hover{border-color:var(--blue);color:var(--text)}
+.ts-toggle.active{border-color:var(--blue);color:var(--blue)}
+.tech-select-wrap{position:relative}
 .tech-checklist label{display:flex;align-items:center;gap:8px;padding:5px 10px;cursor:pointer;font-size:12px;color:var(--text2);transition:.1s}
 .tech-checklist label:hover{background:rgba(56,139,253,.1);color:var(--text)}
 .tech-checklist input[type=checkbox]{accent-color:var(--blue);width:14px;height:14px;flex-shrink:0;cursor:pointer}
@@ -310,6 +315,10 @@ tr:hover td{background:var(--surface2)}
     <div class="filters">
       <div class="tech-select-wrap">
         <span class="ts-label">&#128100; Ver t&#233;cnicos</span>
+        <button class="ts-toggle" id="f-tech-tecnicos-btn" onclick="toggleTechChecklist('tecnicos')">
+          <span id="f-tech-tecnicos-label">&#128269; Buscar t&#233;cnicos</span>
+          <span>&#9660;</span>
+        </button>
         <div class="tech-checklist" id="f-tech-tecnicos">
           <div class="ts-search"><input type="text" placeholder="Buscar..." oninput="filterTechChecklist(this,'tecnicos')"></div>
         </div>
@@ -394,6 +403,10 @@ tr:hover td{background:var(--surface2)}
     <div class="filters">
       <div class="tech-select-wrap">
         <span class="ts-label">&#128100; Ver t&#233;cnicos</span>
+        <button class="ts-toggle" id="f-tech-alertas-btn" onclick="toggleTechChecklist('alertas')">
+          <span id="f-tech-alertas-label">&#128269; Buscar t&#233;cnicos</span>
+          <span>&#9660;</span>
+        </button>
         <div class="tech-checklist" id="f-tech-alertas">
           <div class="ts-search"><input type="text" placeholder="Buscar..." oninput="filterTechChecklist(this,'alertas')"></div>
         </div>
@@ -421,6 +434,10 @@ tr:hover td{background:var(--surface2)}
     <div class="filters">
       <div class="tech-select-wrap">
         <span class="ts-label">&#128100; Ver t&#233;cnicos</span>
+        <button class="ts-toggle" id="f-tech-sugerencias-btn" onclick="toggleTechChecklist('sugerencias')">
+          <span id="f-tech-sugerencias-label">&#128269; Buscar t&#233;cnicos</span>
+          <span>&#9660;</span>
+        </button>
         <div class="tech-checklist" id="f-tech-sugerencias">
           <div class="ts-search"><input type="text" placeholder="Buscar..." oninput="filterTechChecklist(this,'sugerencias')"></div>
         </div>
@@ -1203,6 +1220,42 @@ async function sugAccion(orden, accion){
 // ── Panel checklist técnicos por analista ──
 const _TABS_TECH = ['tecnicos','alertas','sugerencias'];
 
+function toggleTechChecklist(tab){
+  const list = document.getElementById('f-tech-'+tab);
+  const btn  = document.getElementById('f-tech-'+tab+'-btn');
+  if(!list) return;
+  const isOpen = list.classList.contains('open');
+  // Cerrar todos primero
+  ['tecnicos','alertas','sugerencias'].forEach(t=>{
+    const l=document.getElementById('f-tech-'+t);
+    const b=document.getElementById('f-tech-'+t+'-btn');
+    if(l) l.classList.remove('open');
+    if(b) b.classList.remove('active');
+  });
+  if(!isOpen){
+    list.classList.add('open');
+    if(btn) btn.classList.add('active');
+    const input = list.querySelector('input[type=text]');
+    if(input) input.focus();
+    setTimeout(()=>document.addEventListener('click', function handler(e){
+      const wrap = document.getElementById('f-tech-'+tab)?.closest('.tech-select-wrap');
+      if(wrap && !wrap.contains(e.target)){
+        list.classList.remove('open');
+        if(btn) btn.classList.remove('active');
+      } else {
+        document.addEventListener('click', handler, {once:true});
+      }
+    },{once:true}),0);
+  }
+}
+
+function updateTechToggleLabel(tab){
+  const lbl = document.getElementById('f-tech-'+tab+'-label');
+  if(!lbl) return;
+  if(TECH_FILTER.size===0) lbl.textContent='\u{1F50D} Buscar técnicos';
+  else lbl.textContent=`\u{1F50D} ${TECH_FILTER.size} técnico${TECH_FILTER.size!==1?'s':''} seleccionado${TECH_FILTER.size!==1?'s':''}`;
+}
+
 function populateTechPanels(){
   if(!DATA) return;
   const techs = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.tecnico))]
@@ -1240,6 +1293,7 @@ function onTechCheckbox(cb, nombre){
     });
   });
   updateAnalistaUI();
+  _TABS_TECH.forEach(t=>updateTechToggleLabel(t));
   renderAll();
 }
 
@@ -1263,7 +1317,7 @@ function selectAllTechs(tab){
       lbl.classList.remove('checked');
     });
   });
-  updateAnalistaUI(); renderAll();
+  updateAnalistaUI(); _TABS_TECH.forEach(t=>updateTechToggleLabel(t)); renderAll();
 }
 
 function clearTechPanel(tab){ selectAllTechs(tab); }

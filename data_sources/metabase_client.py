@@ -19,11 +19,11 @@ COL_CITY=os.environ.get("COL_CITY","Cities_name")
 COL_GMAPS=os.environ.get("COL_GMAPS","Google Maps Link")
 COL_LAT=os.environ.get("COL_LAT","Latitude")
 COL_LON=os.environ.get("COL_LON","Longitude")
-COL_TECH_ALIASES=["Technician","tecnico","Tecnico","Tech","Nombre Tecnico","nombre_tecnico"]
-COL_STATUS_ALIASES=["Status","estado","Estado","appointment_status","Estado Orden"]
-COL_FRANJA_ALIASES=["Slot","franja","Franja","Horario","Franja Horaria","time_slot"]
-COL_TIPO_ALIASES=["Category","categoria","Categoria","tipo","Tipo","Type","work_type"]
-COL_UPDATED_ALIASES=["Updated At","updated_at","Fecha Actualizacion","last_update"]
+COL_TECH_ALIASES=["tecnico","Tecnico","Technician","Tech","Nombre Tecnico","nombre_tecnico"]
+COL_STATUS_ALIASES=["status_txt","Status","estado","Estado","appointment_status","Estado Orden"]
+COL_FRANJA_ALIASES=["franja_label","Slot","franja","Franja","Horario","Franja Horaria","time_slot"]
+COL_TIPO_ALIASES=["appointment_type_txt","Category","categoria","Categoria","tipo","Tipo","Type","work_type"]
+COL_UPDATED_ALIASES=["onsite_at_cot","Updated At","updated_at","Fecha Actualizacion","last_update"]
 _sc={"token":None,"expires_at":0}
 _dc={"data":None,"fetched_at":0}
 def _get_token():
@@ -77,9 +77,9 @@ def _build_col_map(rows):
             "franja":_find_col(s,COL_FRANJA_ALIASES),"tipo":_find_col(s,COL_TIPO_ALIASES),
             "zona":COL_ZONE if COL_ZONE in s else _find_col(s,["Zone Name","zona"]),
             "subzona":COL_SUBZONE if COL_SUBZONE in s else _find_col(s,["Subzone","subzona"]),
-            "ciudad":COL_CITY if COL_CITY in s else _find_col(s,["Cities_name","ciudad"]),
+            "ciudad":COL_CITY if COL_CITY in s else _find_col(s,["Cities__name","Cities_name","ciudad"]),
             "site":COL_SITE if COL_SITE in s else _find_col(s,["Sites","site"]),
-            "direccion":COL_ADDRESS if COL_ADDRESS in s else _find_col(s,["Addresses_address","direccion"]),
+            "direccion":COL_ADDRESS if COL_ADDRESS in s else _find_col(s,["Addresses__address","Addresses_address","direccion"]),
             "gmaps":COL_GMAPS if COL_GMAPS in s else _find_col(s,["Google Maps Link","gmaps"]),
             "lat":COL_LAT if COL_LAT in s else _find_col(s,["Latitude","lat"]),
             "lon":COL_LON if COL_LON in s else _find_col(s,["Longitude","lon"]),
@@ -119,5 +119,4 @@ def invalidate_cache(): _dc.update({"data":None,"fetched_at":0})
 def cache_info():
     now=time.time(); age=now-_dc["fetched_at"] if _dc["fetched_at"] else None
     return {"has_data":bool(_dc["data"]),"rows":len(_dc["data"]) if _dc["data"] else 0,
-            "age_seconds":round(age,1) if age else None,"ttl_seconds":DATA_CACHE_TTL,
-            "fresh":age is not None and age<DATA_CACHE_TTL}
+            "age_seconds":round(age,1) if age

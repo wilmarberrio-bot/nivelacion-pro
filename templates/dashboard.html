@@ -580,7 +580,9 @@ function _buildColMap(headers){
 function _normOrderD(row,cm){
   const g=k=>cm[k]?_ns(row[cm[k]],''):'';
   const gf=k=>{try{const v=cm[k]?row[cm[k]]:null;return v!=null&&v!==''?parseFloat(v)||0:0;}catch(e){return 0;}};
-  const zona=_nsu(g('zona')||g('ciudad'),'SIN_ZONA')||'SIN_ZONA';
+  const zonaRaw=g('zona'), ciudadRaw=g('ciudad');
+  const zona=_nsu((zonaRaw&&zonaRaw!=='SIN_ZONA')?zonaRaw:ciudadRaw,'SIN_ZONA')||'SIN_ZONA';
+  const ciudad=_nsu(ciudadRaw||zonaRaw,'SIN_ZONA');
   const clase=_classSt(g('estado')||'por programar');
   return{id:g('id')||`sid_${Math.random().toString(36).slice(2)}`,tecnico:g('tecnico')||'SIN_ASIGNAR',estado:g('estado')||'por programar',franja:_normFranjaD(g('franja')),tipo:(g('tipo')||'instalacion').toLowerCase(),zona,subzona:_nsu(g('subzona'),'SIN_SUBZONA'),direccion:g('direccion'),lat:gf('lat'),lon:gf('lon'),updated_at:g('updated_at'),gmaps:g('gmaps'),estado_clase:clase,movible:clase==='movible',_source:'excel_desktop'};
 }
@@ -594,7 +596,8 @@ function runLevelingJS(orders){
     const finalizadas=ords.filter(o=>_FIN.some(f=>_normSt(o.estado).includes(f))).length;
     const franjas={};ords.forEach(o=>{franjas[o.franja]=(franjas[o.franja]||0)+1;});
     const por_estado={};ords.forEach(o=>{const e=_normSt(o.estado)||'desconocido';por_estado[e]=(por_estado[e]||0)+1;});
-    return{tecnico,zona:ords[0]?.zona||'SIN_ZONA',total,movibles,activas,finalizadas,bloqueadas:total-movibles,sobrecarga:total>5&&tecnico!=='SIN_ASIGNAR',franjas,por_estado};
+    const zonaT=ords[0]?.zona||'SIN_ZONA'; const ciudadT=ords[0]?.ciudad||zonaT;
+    return{tecnico,zona:zonaT==='SIN_ZONA'?ciudadT:zonaT,ciudad:ciudadT,total,movibles,activas,finalizadas,bloqueadas:total-movibles,sobrecarga:total>5&&tecnico!=='SIN_ASIGNAR',franjas,por_estado};
   }).sort((a,b)=>b.total-a.total);
   const byF={};
   for(const o of orders){const f=o.franja||'Sin Franja';if(!byF[f])byF[f]={total:0,movibles:0,bloqueadas:0,techs:new Set()};byF[f].total++;if(o.movible)byF[f].movibles++;else byF[f].bloqueadas++;byF[f].techs.add(o.tecnico);}
@@ -941,7 +944,7 @@ function renderTecnicos(){
           ${t.sobrecarga?'<span class="overload-dot"></span>':''}
           ${esc(t.tecnico)}
         </div>
-        <div class="tech-zone">📍 ${esc(t.zona)}</div>
+        <div class="tech-zone">📍 ${esc(t.zona==='SIN_ZONA'?(t.ciudad||t.zona):t.zona)}</div>
         <div class="progress-bar"><div class="progress-fill ${color}" style="width:${pct}%"></div></div>
         <div class="tech-stats">
           <div class="tech-stat"><span class="val">${t.total}</span><span class="lbl">Total</span></div>

@@ -1119,6 +1119,11 @@ def run_leveling(raw_orders: list) -> dict:
         sobrecarga = total > MAX_IDEAL_LOAD
         franja_map = idx["tech_franja"].get(tech, {})
         subzones   = list(idx["tech_subzones"].get(tech, set()))
+        # Desglose por estado específico
+        por_estado = {}
+        for o in t_orders:
+            est = str(o.get("estado", "desconocido")).strip().lower()
+            por_estado[est] = por_estado.get(est, 0) + 1
         carga_por_tecnico.append({
             "tecnico":    tech,
             "zona":       idx["tech_main_zone"].get(tech, "SIN_ZONA"),
@@ -1130,6 +1135,7 @@ def run_leveling(raw_orders: list) -> dict:
             "sobrecarga": sobrecarga,
             "franjas":    franja_map,
             "subzonas":   subzones,
+            "por_estado": por_estado,
         })
 
     # 7. Carga por franja

@@ -122,12 +122,45 @@ def _get_active_order(tech: str, tech_orders: dict) -> dict:
 
 
 def _dist_to_tech(order: dict, tech: str, tech_orders: dict, tech_locs: dict):
-    if not order.get("lat") or not order.get("lon"):
-        return None
+    """
+    Distancia estimada entre una orden y el técnico.
+    Prioridad:
+      1. Lat/Lon directas (Haversine exacto)
+      2. Coords extraídas del Google Maps link (ya resueltas en excel_loader)
+      3. Zona/Subzona coincidente → distancia simbólica baja (misma área)
+      4. Ciudad coincidente → distancia simbólica media
+      5. Sin datos → None (penalización en scoring)
+    """
+    order_lat = order.get("lat") or 0.0
+    order_lon = order.get("lon") or 0.0
     ref = _tech_reference_point(tech, tech_orders, tech_locs)
-    if ref == (0.0, 0.0):
+
+    # 1 y 2: coords disponibles en ambos lados → Haversine exacto
+    if order_lat and order_lon and ref != (0.0, 0.0):
+        return haversine(order_lat, order_lon, ref[0], ref[1])
+
+    # 3: sin coords → fallback por zona/subzona/ciudad
+    tech_ords = tech_orders.get(tech, [])
+    if not tech_ords:
         return None
-    return haversine(order["lat"], order["lon"], ref[0], ref[1])
+
+    order_zona    = (order.get("zona")    or "").upper().strip()
+    order_subzona = (order.get("subzona") or "").upper().strip()
+    order_ciudad  = (order.get("ciudad")  or order_zona).upper().strip()
+
+    for t_ord in tech_ords:
+        t_zona    = (t_ord.get("zona")    or "").upper().strip()
+        t_subzona = (t_ord.get("subzona") or "").upper().strip()
+        t_ciudad  = (t_ord.get("ciudad")  or t_zona).upper().strip()
+
+        if order_subzona and order_subzona == t_subzona and order_subzona != "SIN_SUBZONA":
+            return 0.5   # Misma subzona: distancia simbólica muy baja
+        if order_zona and order_zona == t_zona and order_zona != "SIN_ZONA":
+            return 2.0   # Misma zona: distancia simbólica aceptable
+        if order_ciudad and order_ciudad == t_ciudad and order_ciudad != "SIN_ZONA":
+            return 4.0   # Misma ciudad: dentro del límite operativo
+
+    return None  # Sin ningún dato geográfico en común
 
 
 def _tech_load_score(tech: str, tech_pending: dict, tech_total: dict,
@@ -883,6 +916,10 @@ def _nearest_neighbor_chain(start_lat: float, start_lon: float,
 
     chain = []
     cur_lat, cur_lon = start_lat, start_lon
+    # Contexto geográfico actual (para fallback sin coords)
+    cur_zona    = next((o.get("zona")    for o in candidates if o.get("zona")),    "")
+    cur_subzona = next((o.get("subzona") for o in candidates if o.get("subzona")), "")
+    cur_ciudad  = next((o.get("ciudad")  for o in candidates if o.get("ciudad")),  "")
 
     for franja in franjas_ordenadas:
         # Órdenes de esta franja
@@ -896,10 +933,20 @@ def _nearest_neighbor_chain(start_lat: float, start_lon: float,
         while remaining:
             best_idx, best_dist = 0, float("inf")
             for i, o in enumerate(remaining):
-                if o.get("lat") and o.get("lon"):
+                if o.get("lat") and o.get("lon") and cur_lat and cur_lon:
+                    # 1. Haversine exacto con coordenadas
                     d = haversine(cur_lat, cur_lon, o["lat"], o["lon"])
+                elif o.get("subzona") and cur_subzona and o.get("subzona") == cur_subzona:
+                    # 2. Misma subzona sin coords: distancia simbólica baja
+                    d = 0.5
+                elif o.get("zona") and cur_zona and o.get("zona") == cur_zona:
+                    # 3. Misma zona sin coords
+                    d = 2.0
+                elif o.get("ciudad") and cur_ciudad and o.get("ciudad") == cur_ciudad:
+                    # 4. Misma ciudad sin coords
+                    d = 4.0
                 else:
-                    d = 999.0  # Sin coords: al final de la franja
+                    d = 999.0  # Sin datos geográficos en común: al final
                 if d < best_dist:
                     best_dist = d
                     best_idx = i
@@ -907,6 +954,9 @@ def _nearest_neighbor_chain(start_lat: float, start_lon: float,
             chain.append(chosen)
             if chosen.get("lat") and chosen.get("lon"):
                 cur_lat, cur_lon = chosen["lat"], chosen["lon"]
+            cur_zona    = (chosen.get("zona")    or cur_zona)
+            cur_subzona = (chosen.get("subzona") or cur_subzona)
+            cur_ciudad  = (chosen.get("ciudad")  or cur_ciudad)
 
     return chain
 

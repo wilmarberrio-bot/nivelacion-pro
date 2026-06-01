@@ -94,7 +94,13 @@ def normalize_order(order):
     o["tecnico"]=norm_text(o.get("tecnico"),"SIN_ASIGNAR") or "SIN_ASIGNAR"
     o["estado"]=norm_text(o.get("estado"),"por programar")
     o["franja"]=norm_franja(o.get("franja"))
-    o["zona"]=norm_zone(o.get("zona"))
+    # Zona con fallback a Cities__name cuando está vacía
+    zona_raw = o.get("zona", "") or ""
+    ciudad_raw = o.get("ciudad", "") or ""
+    if not zona_raw or str(zona_raw).strip().upper() in ("SIN_ZONA", "NONE", "NAN", ""):
+        o["zona"] = norm_zone(ciudad_raw) if ciudad_raw else "SIN_ZONA"
+    else:
+        o["zona"] = norm_zone(zona_raw)
     o["subzona"]=norm_subzone(o.get("subzona"))
     o["tipo"]=norm_text(o.get("tipo"),"instalacion").lower()
     o["lat"]=float(o.get("lat") or 0); o["lon"]=float(o.get("lon") or 0)

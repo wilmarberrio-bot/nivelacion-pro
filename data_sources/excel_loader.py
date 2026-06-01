@@ -11,7 +11,8 @@ _ALIASES = {
     "estado":    ["status_txt","Status","estado","Estado","appointment_status"],
     "franja":    ["franja_label","Slot","franja","Franja","Horario","time_slot"],
     "tipo":      ["appointment_type_txt","Category","tipo","Tipo","Type"],
-    "zona":      ["Zone Name","zona","Zone","Cities__name","Cities_name","municipio"],
+    "zona":      ["Zone Name","zona","Zone","municipio"],
+    "ciudad":    ["Cities__name","Cities_name","Ciudad","ciudad","city"],
     "subzona":   ["Subzone","subzona","barrio","sector"],
     "direccion": ["Addresses__address","Addresses_address","direccion","address"],
     "gmaps":     ["Google Maps Link","gmaps","maps","link"],
@@ -73,8 +74,11 @@ def load_from_bytes(file_bytes, filename=""):
         lat, lon = gf("lat"), gf("lon")
         if not lat and not lon: lat, lon = _coords(g("gmaps"))
         zona = g("zona", "").strip()
-        if not zona or zona.lower() == "none": zona = "SIN_ZONA"
-        else: zona = zona.upper()
+        ciudad = g("ciudad", "").strip()
+        # Fallback: si zona está vacía, usar Cities__name como zona
+        if not zona or zona.lower() in ("none", "nan", ""):
+            zona = ciudad if ciudad and ciudad.lower() not in ("none", "nan", "") else "SIN_ZONA"
+        zona = zona.upper()
         estado = g("estado", "por programar").lower()
         orders.append({
             "id":        order_id,
@@ -83,6 +87,7 @@ def load_from_bytes(file_bytes, filename=""):
             "franja":    g("franja",    "Sin Franja"),
             "tipo":      g("tipo",      "instalacion").lower(),
             "zona":      zona,
+            "ciudad":    ciudad.upper() if ciudad else zona,
             "subzona":   g("subzona",   "SIN_SUBZONA").upper() or "SIN_SUBZONA",
             "site":      g("site",      ""),
             "direccion": g("direccion", ""),

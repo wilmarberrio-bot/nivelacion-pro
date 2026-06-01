@@ -68,20 +68,57 @@ def _parse_updated_at(updated_at_str: str):
 
 
 def _tech_reference_point(tech: str, tech_orders: dict, tech_locs: dict):
-    for o in tech_orders.get(tech, []):
-        if 1 <= o.get("progress", 0) < 6 and o.get("lat") and o.get("lon"):
+    """
+    Punto de partida real del técnico para calcular distancias de nivelación.
+    Prioridad operativa:
+      1. Orden "En sitio" (técnico está físicamente ahí — es la referencia más precisa)
+      2. Orden "Iniciado/a" (está trabajando — posición fija)
+      3. Orden "En camino" (en desplazamiento — usa destino como referencia)
+      4. Próxima orden programada por franja (donde estará pronto)
+      5. Centroide de todas sus ubicaciones (último recurso)
+    """
+    orders = tech_orders.get(tech, [])
+
+    # 1. En sitio (progress=2) — posición más confiable
+    for o in orders:
+        st = str(o.get("estado", "")).lower()
+        if "en sitio" in st and o.get("lat") and o.get("lon"):
             return (o["lat"], o["lon"])
+
+    # 2. Iniciado/a (progress=3-5) — está trabajando en ese punto
+    for o in orders:
+        st = str(o.get("estado", "")).lower()
+        if any(k in st for k in ("iniciado", "iniciada", "trabajando")) and o.get("lat") and o.get("lon"):
+            return (o["lat"], o["lon"])
+
+    # 3. En camino (progress=1) — su destino es la referencia
+    for o in orders:
+        st = str(o.get("estado", "")).lower()
+        if "en camino" in st and o.get("lat") and o.get("lon"):
+            return (o["lat"], o["lon"])
+
+    # 4. Próxima orden programada (la que tiene franja más temprana pendiente)
     upcoming = [
         (parse_franja_hours(o.get("franja", ""))[0] or 99, o)
-        for o in tech_orders.get(tech, [])
+        for o in orders
         if o.get("movible") and o.get("lat") and o.get("lon")
     ]
     if upcoming:
         upcoming.sort(key=lambda x: x[0])
-        od = upcoming[0][1]
-        return (od["lat"], od["lon"])
+        return (upcoming[0][1]["lat"], upcoming[0][1]["lon"])
+
+    # 5. Centroide de todas sus ubicaciones conocidas
     locs = tech_locs.get(tech, [])
     return get_centroid(locs) if locs else (0.0, 0.0)
+
+
+def _get_active_order(tech: str, tech_orders: dict) -> dict:
+    """Retorna la orden activa (En sitio o Iniciado) del técnico, si existe."""
+    for o in tech_orders.get(tech, []):
+        st = str(o.get("estado", "")).lower()
+        if any(k in st for k in ("en sitio", "iniciado", "iniciada", "trabajando")):
+            return o
+    return {}
 
 
 def _dist_to_tech(order: dict, tech: str, tech_orders: dict, tech_locs: dict):
@@ -198,12 +235,13 @@ def _build_indexes(orders: list) -> dict:
         if o.get("lat") and o.get("lon"):
             tech_locs.setdefault(tech, []).append((o["lat"], o["lon"]))
 
-        # tech_zone (zona con más órdenes gana)
+        # tech_zone: zona principal con fallback a Cities__name
+        zona_efectiva = zona if zona != "SIN_ZONA" else o.get("ciudad", "SIN_ZONA") or "SIN_ZONA"
         tech_zone.setdefault(tech, {})
-        tech_zone[tech][zona] = tech_zone[tech].get(zona, 0) + 1
+        tech_zone[tech][zona_efectiva] = tech_zone[tech].get(zona_efectiva, 0) + 1
 
         # zone_techs
-        zone_techs.setdefault(zona, set()).add(tech)
+        zone_techs.setdefault(zona_efectiva, set()).add(tech)
 
     # Resolver zona principal de cada técnico
     tech_main_zone = {
@@ -614,9 +652,23 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
         return -9999.0
     score += 300
 
-    # ─── Distancia (criterio secundario) ───
-    dist_recv  = _dist_to_tech(order, receiver, tech_orders, tech_locs)
-    dist_donor = _dist_to_tech(order, donor, tech_orders, tech_locs) if donor not in ("SIN_ASIGNAR", None) else None
+    # ─── Distancia desde la orden ACTIVA del receptor (En sitio / Iniciado) ───
+    # La referencia correcta NO es el centroide sino donde está el técnico AHORA.
+    active_recv = _get_active_order(receiver, tech_orders)
+    if active_recv.get("lat") and active_recv.get("lon") and order.get("lat") and order.get("lon"):
+        # Distancia desde la orden activa del receptor hasta la orden a mover
+        dist_recv = haversine(active_recv["lat"], active_recv["lon"], order["lat"], order["lon"])
+    else:
+        dist_recv = _dist_to_tech(order, receiver, tech_orders, tech_locs)
+
+    # Distancia desde la orden activa del donor hasta la orden (para calcular ahorro)
+    active_donor = _get_active_order(donor, tech_orders) if donor not in ("SIN_ASIGNAR", None) else {}
+    if active_donor.get("lat") and active_donor.get("lon") and order.get("lat") and order.get("lon"):
+        dist_donor = haversine(active_donor["lat"], active_donor["lon"], order["lat"], order["lon"])
+    elif donor not in ("SIN_ASIGNAR", None):
+        dist_donor = _dist_to_tech(order, donor, tech_orders, tech_locs)
+    else:
+        dist_donor = None
 
     if dist_recv is not None and dist_recv > MAX_ALLOWED_DISTANCE_KM:
         score -= INTERZONE_DISTANCE_PENALTY
@@ -625,17 +677,20 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
 
     if dist_donor is not None and dist_recv is not None:
         savings = dist_donor - dist_recv
-        score += savings * 300  # Mayor peso al ahorro de distancia
+        score += savings * 300  # Ahorro real de desplazamiento
 
-    # ─── Bono directo por proximidad física al técnico receptor ───
-    # Prioriza órdenes que caen dentro de la ruta actual del técnico
+    # ─── Bono por proximidad desde la posición activa del receptor ───
+    # Cuanto más cerca esté la orden de donde el técnico está trabajando AHORA,
+    # más productivo es el movimiento (mínimo desplazamiento al terminar la actual).
     if dist_recv is not None:
-        if dist_recv < 2.0:
-            score += 900  # Misma cuadra / muy cercano: altísimo valor operativo
+        if dist_recv < 1.0:
+            score += 1200  # < 1km: misma cuadra — movimiento óptimo
+        elif dist_recv < 2.0:
+            score += 900   # < 2km: muy cercano — alta productividad
         elif dist_recv < 5.0:
-            score += 500  # Cercano: mejora ruta sin desvío significativo
+            score += 500   # < 5km: aceptable
         elif dist_recv < 10.0:
-            score += 150  # Aceptable: leve desvío
+            score += 150   # < 10km: desvío leve
 
     # ─── Bonus/penalización por zona ───
     recv_zone_main = idx["tech_main_zone"].get(receiver, "SIN_ZONA")
@@ -807,6 +862,94 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
 
 # ─── Rutas completas para técnicos con capacidad ─────────────────────
 
+def _nearest_neighbor_chain(start_lat: float, start_lon: float,
+                            candidates: list) -> list:
+    """
+    Construye la secuencia óptima de órdenes combinando franja horaria y proximidad.
+    Regla operativa:
+      1. Respetar el orden de franjas (no saltar hacia atrás en el tiempo)
+      2. Dentro de cada franja, ir a la orden más cercana desde la posición actual
+    Esto garantiza que el técnico no tiene que regresar sobre sus pasos
+    y llega a cada orden en el momento correcto de la franja.
+    """
+    if not candidates:
+        return []
+
+    # Agrupar por franja ordenada cronológicamente
+    franjas_ordenadas = sorted(
+        set(o.get("franja", "Sin Franja") for o in candidates),
+        key=lambda f: parse_franja_hours(f)[0] or 99
+    )
+
+    chain = []
+    cur_lat, cur_lon = start_lat, start_lon
+
+    for franja in franjas_ordenadas:
+        # Órdenes de esta franja
+        en_franja = [o for o in candidates if o.get("franja", "Sin Franja") == franja]
+        sin_franja = [] if franja != "Sin Franja" else candidates
+
+        grupo = en_franja if franja != "Sin Franja" else sin_franja
+        remaining = list(grupo)
+
+        # Nearest-neighbor dentro de la franja
+        while remaining:
+            best_idx, best_dist = 0, float("inf")
+            for i, o in enumerate(remaining):
+                if o.get("lat") and o.get("lon"):
+                    d = haversine(cur_lat, cur_lon, o["lat"], o["lon"])
+                else:
+                    d = 999.0  # Sin coords: al final de la franja
+                if d < best_dist:
+                    best_dist = d
+                    best_idx = i
+            chosen = remaining.pop(best_idx)
+            chain.append(chosen)
+            if chosen.get("lat") and chosen.get("lon"):
+                cur_lat, cur_lon = chosen["lat"], chosen["lon"]
+
+    return chain
+
+
+def _two_opt_route(orders: list) -> list:
+    """
+    Optimización 2-opt: mejora la secuencia de órdenes reduciendo cruces de ruta.
+    Opera sobre la lista ya ordenada por nearest-neighbor para pulir el resultado.
+    """
+    if len(orders) <= 3:
+        return orders
+
+    def route_km(seq):
+        total = 0.0
+        for i in range(len(seq) - 1):
+            a, b = seq[i], seq[i + 1]
+            if a.get("lat") and a.get("lon") and b.get("lat") and b.get("lon"):
+                total += haversine(a["lat"], a["lon"], b["lat"], b["lon"])
+        return total
+
+    best = list(orders)
+    improved = True
+    while improved:
+        improved = False
+        for i in range(1, len(best) - 2):
+            for k in range(i + 1, len(best) - 1):
+                candidate = best[:i] + best[i:k + 1][::-1] + best[k + 1:]
+                if route_km(candidate) < route_km(best):
+                    best = candidate
+                    improved = True
+    return best
+
+
+def _route_total_km(orders: list) -> float:
+    """Distancia total de la ruta en km."""
+    total = 0.0
+    for i in range(len(orders) - 1):
+        a, b = orders[i], orders[i + 1]
+        if a.get("lat") and a.get("lon") and b.get("lat") and b.get("lon"):
+            total += haversine(a["lat"], a["lon"], b["lat"], b["lon"])
+    return round(total, 2)
+
+
 def _generate_route_suggestions(orders: list, idx: dict) -> list:
     """
     Para técnicos con capacidad (total < MIN_IDEAL_LOAD), agrupa las órdenes
@@ -861,29 +1004,41 @@ def _generate_route_suggestions(orders: list, idx: dict) -> list:
             if not disponibles:
                 continue
 
-            # Ordenar candidatas por proximidad al técnico (ruta más eficiente)
-            tech_orders_local = idx["tech_orders"]
-            tech_locs_local   = idx["tech_locs"]
-            tech_ref = _tech_reference_point(tech, tech_orders_local, tech_locs_local)
-            if tech_ref != (0.0, 0.0):
-                def dist_to_ref(o):
-                    if o.get("lat") and o.get("lon"):
-                        return haversine(o["lat"], o["lon"], tech_ref[0], tech_ref[1])
-                    return 999.0
-                disponibles = sorted(disponibles, key=dist_to_ref)
+            # ── Punto de inicio: orden activa (En sitio / Iniciado) del técnico ──
+            tech_ref = _tech_reference_point(tech, idx["tech_orders"], idx["tech_locs"])
+            active_order = _get_active_order(tech, idx["tech_orders"])
+            start_lat = active_order.get("lat") or (tech_ref[0] if tech_ref != (0.0, 0.0) else None)
+            start_lon = active_order.get("lon") or (tech_ref[1] if tech_ref != (0.0, 0.0) else None)
 
-            # Respetar límite de franja al armar la ruta
+            # ── Filtrar por límite de franja antes del ordenamiento ──
             franjas_ocupadas = dict(tech_franja.get(tech, {}))
-            ordenes_validas  = []
+            candidatas_validas = []
             for o in disponibles:
-                if len(ordenes_validas) >= capacidad:
-                    break
                 f = o.get("franja", "Sin Franja")
                 if f != "Sin Franja" and franjas_ocupadas.get(f, 0) >= MAX_ORDERS_PER_SLOT:
                     continue
+                candidatas_validas.append(o)
+
+            # ── Nearest-neighbor desde la orden activa del técnico ──
+            if start_lat and start_lon:
+                ordenadas = _nearest_neighbor_chain(start_lat, start_lon, candidatas_validas)
+            else:
+                ordenadas = candidatas_validas  # Sin coords: mantener orden original
+
+            # ── Tomar hasta la capacidad disponible ──
+            ordenes_validas = []
+            franjas_usadas = dict(tech_franja.get(tech, {}))
+            for o in ordenadas:
+                if len(ordenes_validas) >= capacidad:
+                    break
+                f = o.get("franja", "Sin Franja")
                 if f != "Sin Franja":
-                    franjas_ocupadas[f] = franjas_ocupadas.get(f, 0) + 1
+                    franjas_usadas[f] = franjas_usadas.get(f, 0) + 1
                 ordenes_validas.append(o)
+
+            # ── 2-opt: optimizar secuencia final para reducir cruces ──
+            if len(ordenes_validas) > 3:
+                ordenes_validas = _two_opt_route(ordenes_validas)
 
             # Solo generar ruta si aporta al menos 2 órdenes (una sola no es "ruta")
             if len(ordenes_validas) < 2:
@@ -901,11 +1056,17 @@ def _generate_route_suggestions(orders: list, idx: dict) -> list:
                 + (MIN_IDEAL_LOAD - cuota_actual) * 600
             )
 
+            km_total = _route_total_km(ordenes_validas)
+            inicio_desc = (
+                f"desde '{active_order.get('estado', '')}' en {active_order.get('subzona', active_order.get('zona', ''))}"
+                if active_order else "desde última posición conocida"
+            )
             motivo = (
-                f"{tech} tiene {cuota_actual} orden(es) — puede completar cuota con "
-                f"{len(ordenes_validas)} orden(es) disponibles en {zona}"
-                f"{'  (su zona)' if es_zona_propia else ' (zona adyacente)'}. "
-                f"Propuesta: {cuota_actual}\u2192{cuota_propuesta} órdenes."
+                f"{tech} tiene {cuota_actual} orden(es). "
+                f"Ruta propuesta {inicio_desc}: "
+                f"{len(ordenes_validas)} orden(es) en {zona} ordenadas por cercanía. "
+                f"Distancia total estimada: {km_total}km. "
+                f"Cuota: {cuota_actual}→{cuota_propuesta} órdenes."
             )
 
             rutas.append({
@@ -921,6 +1082,10 @@ def _generate_route_suggestions(orders: list, idx: dict) -> list:
                         "franja":         o["franja"],
                         "tecnico_actual": o["tecnico"],
                         "estado":         o["estado"],
+                        "lat":            o.get("lat"),
+                        "lon":            o.get("lon"),
+                        "subzona":        o.get("subzona", ""),
+                        "direccion":      o.get("direccion", ""),
                     }
                     for o in ordenes_validas
                 ],
@@ -929,6 +1094,8 @@ def _generate_route_suggestions(orders: list, idx: dict) -> list:
                 "cuota_propuesta":  cuota_propuesta,
                 "franjas":          franjas_ruta,
                 "tipos":            tipos_ruta,
+                "km_total":         km_total,
+                "inicio_ref":       inicio_desc,
                 "motivo":           motivo,
                 "riesgo":           "bajo" if cuota_propuesta <= MAX_IDEAL_LOAD else "medio",
                 "score":            round(score_ruta, 1),
@@ -1011,15 +1178,31 @@ def _generate_swap_suggestions(orders: list, idx: dict) -> list:
                     subs_b_after = (subs_b - {order_y["subzona"]}) | {order_x["subzona"]}
                     subz_delta   = (len(subs_a) + len(subs_b)) - (len(subs_a_after) + len(subs_b_after))
 
-                    dist_xa = _dist_to_tech(order_x, tech_a, tech_orders, tech_locs)
-                    dist_yb = _dist_to_tech(order_y, tech_b, tech_orders, tech_locs)
-                    dist_xb = _dist_to_tech(order_x, tech_b, tech_orders, tech_locs)
-                    dist_ya = _dist_to_tech(order_y, tech_a, tech_orders, tech_locs)
+                    # Usar posición de la orden activa (En sitio/Iniciado) como referencia
+                    # para calcular el ahorro real de desplazamiento del intercambio
+                    active_a = _get_active_order(tech_a, tech_orders)
+                    active_b = _get_active_order(tech_b, tech_orders)
+
+                    def dist_from_active(order, active, tech, locs):
+                        if active.get("lat") and active.get("lon") and order.get("lat") and order.get("lon"):
+                            return haversine(active["lat"], active["lon"], order["lat"], order["lon"])
+                        return _dist_to_tech(order, tech, tech_orders, locs)
+
+                    dist_xa = dist_from_active(order_x, active_a, tech_a, tech_locs)
+                    dist_yb = dist_from_active(order_y, active_b, tech_b, tech_locs)
+                    dist_xb = dist_from_active(order_x, active_b, tech_b, tech_locs)
+                    dist_ya = dist_from_active(order_y, active_a, tech_a, tech_locs)
 
                     has_coords = all(d is not None for d in [dist_xa, dist_yb, dist_xb, dist_ya])
                     dist_saving = 0.0
                     if has_coords:
                         dist_saving = (dist_xa + dist_yb) - (dist_xb + dist_ya)
+
+                    # Verificar que el intercambio también respeta la franja
+                    # (misma franja garantiza que no se adelanta ni atrasa ninguna orden)
+                    franja_ok = order_x["franja"] == order_y["franja"]
+                    if not franja_ok:
+                        continue  # No intercambiar entre franjas distintas
 
                     score = zone_delta * 900 + subz_delta * 300 + dist_saving * 250
                     if score <= 50:
@@ -1037,10 +1220,13 @@ def _generate_swap_suggestions(orders: list, idx: dict) -> list:
                     if has_coords and dist_saving > 0.5:
                         beneficio_parts.append(f"Ahorro ~{dist_saving:.1f}km")
 
+                    ahorro_txt = f" | Ahorro de desplazamiento: {dist_saving:.1f}km" if (has_coords and dist_saving > 0.3) else ""
                     motivo = (
-                        f"Intercambio: {tech_a} ↔ {tech_b} | "
-                        f"Orden {order_x['id']} (zona {zone_x}) ↔ Orden {order_y['id']} (zona {zone_y}) "
-                        f"en franja {franja}"
+                        f"Intercambio en franja {franja}: "
+                        f"{tech_a} cede #{order_x['id']} ({zone_x}) → {tech_b} | "
+                        f"{tech_b} cede #{order_y['id']} ({zone_y}) → {tech_a}"
+                        f"{ahorro_txt}. "
+                        f"Cada técnico queda con la orden más cercana a donde está trabajando."
                     )
                     riesgo = "bajo" if zone_delta >= 2 else ("medio" if zone_delta >= 1 else "alto")
 
@@ -1124,9 +1310,16 @@ def run_leveling(raw_orders: list) -> dict:
         for o in t_orders:
             est = str(o.get("estado", "desconocido")).strip().lower()
             por_estado[est] = por_estado.get(est, 0) + 1
+        zona_display = idx["tech_main_zone"].get(tech, "SIN_ZONA")
+        if zona_display == "SIN_ZONA":
+            # Fallback: usar ciudad de la primera orden del técnico
+            for _o in t_orders:
+                _c = _o.get("ciudad", "") or ""
+                if _c and _c.upper() not in ("SIN_ZONA", ""):
+                    zona_display = _c.upper(); break
         carga_por_tecnico.append({
             "tecnico":    tech,
-            "zona":       idx["tech_main_zone"].get(tech, "SIN_ZONA"),
+            "zona":       zona_display,
             "total":      total,
             "movibles":   movibles_t,
             "bloqueadas": bloq_t,

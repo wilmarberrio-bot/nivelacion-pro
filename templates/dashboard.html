@@ -895,7 +895,7 @@ function buildStatusPills(por_estado, tecnico){
     {keys:['programado','programada','por programar','inbound'],                      cls:'st-prog',     icon:'⬜', label:'Prog.'},
     {keys:['en camino'],                                                              cls:'st-camino',   icon:'🚗', label:'En camino'},
     {keys:['en sitio'],                                                               cls:'st-sitio',    icon:'🏠', label:'En sitio'},
-    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'],  cls:'st-inic',     icon:'🔧', label:'En ejec.'},
+    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'],  cls:'st-inic',     icon:'🔧', label:'Iniciado'},
     {keys:['por auditar','dispositivos subidos','dispositivos cargados'],              cls:'st-audit',    icon:'🔍', label:'Por auditar'},
     {keys:['sin cargar dispositivos'],                                                cls:'st-sindev',   icon:'⚠️', label:'Sin dispositivos'},
     {keys:['finalizado','finalizada','completado'],                                   cls:'st-fin',      icon:'✅', label:'Fin.'},
@@ -947,11 +947,9 @@ function togglePillDetail(pill){
   });
   if(!match.length){det.innerHTML='<em style="color:var(--text3)">Sin órdenes</em>';}
   else{
-    det.innerHTML=match.map(o=>`<div class="pill-detail-row">
-      <a href="https://admin.somosinternet.com/appointments/${esc(o.id)}" target="_blank">#${esc(o.id)}</a>
-      <span style="color:var(--text2)">${esc(o.franja||'')}</span>
-      <span style="color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px">${esc(o.direccion||o.zona||'')}</span>
-    </div>`).join('');
+    det.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0">'+
+      match.map(o=>`<a href="https://admin.somosinternet.com/appointments/${esc(o.id)}" target="_blank" style="color:var(--blue);font-weight:600;background:rgba(56,139,253,.1);border-radius:4px;padding:2px 6px">#${esc(o.id)}</a>`).join('')+
+    '</div>';
   }
   // Close other open details for same card
   pill.closest('.tech-card').querySelectorAll('.pill-detail.open').forEach(d=>{if(d.id!==detailId)d.classList.remove('open');});

@@ -904,13 +904,13 @@ function buildStatusPills(por_estado, tecnico){
   ];
   const pills = [];
   let pillIdx = 0;
-  const techKey = (tecnico||'').replace(/['"]/g,'_');
+  const techKey = (tecnico||'').replace(/[^a-zA-Z0-9]/g,'_');
   MAP.forEach(group=>{
     let cnt=0;
     group.keys.forEach(k=>{ cnt += por_estado[k]||0; });
     if(cnt>0){
       const pid=`pill-${techKey}-${pillIdx++}`;
-      const keysJson=JSON.stringify(group.keys).replace(/"/g,"'");
+      const keysJson=JSON.stringify(group.keys); // keep double-quotes: valid inside single-quote attr
       pills.push(`<span id="${pid}" class="st-pill ${group.cls}" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">${group.icon} ${group.label} <strong>${cnt}</strong></span>`);
     }
   });
@@ -919,7 +919,7 @@ function buildStatusPills(por_estado, tecnico){
   Object.entries(por_estado).forEach(([k,v])=>{
     if(!mapped.includes(k)&&v>0){
       const pid=`pill-${techKey}-${pillIdx++}`;
-      const keysJson=JSON.stringify([k]).replace(/"/g,"'");
+      const keysJson=JSON.stringify([k]);
       pills.push(`<span id="${pid}" class="st-pill st-fin" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">• ${esc(k)} <strong>${v}</strong></span>`);
     }
   });
@@ -928,10 +928,10 @@ function buildStatusPills(por_estado, tecnico){
 
 function togglePillDetail(pill){
   const techName = pill.dataset.tech;
-  const keys = JSON.parse(pill.dataset.keys.replace(/'/g,'"'));
+  const keys = JSON.parse(pill.dataset.keys);
   const pillsDiv = pill.closest('.status-pills');
   const detailId = 'det-'+pill.id;
-  let det = pillsDiv.querySelector('#'+detailId);
+  let det = pillsDiv.parentElement.querySelector('#'+CSS.escape(detailId));
   if(!det){
     det = document.createElement('div');
     det.id = detailId;
@@ -941,7 +941,7 @@ function togglePillDetail(pill){
   if(det.classList.contains('open')){det.classList.remove('open');return;}
   const allOrds=[...(DATA.ordenes_movibles||[]),...(DATA.ordenes_bloqueadas||[])];
   const match=allOrds.filter(o=>{
-    if((o.tecnico||'SIN_ASIGNAR')!==techName) return false;
+    if((o.tecnico||'SIN_ASIGNAR').trim()!==techName.trim()) return false;
     const s=_normSt(o.estado);
     return keys.some(k=>s.includes(k));
   });

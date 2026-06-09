@@ -166,6 +166,16 @@ tr:hover td{background:var(--surface2)}
 .st-sitio{background:rgba(255,166,87,.15);color:var(--orange)}
 .st-inic{background:rgba(188,140,255,.15);color:var(--purple)}
 .st-fin{background:rgba(110,118,129,.12);color:var(--text3)}
+.st-sindev{background:rgba(255,100,80,.15);color:#f08080}
+.st-reprogram{background:rgba(180,120,255,.15);color:#b47aff}
+.st-ejec{background:rgba(255,140,0,.15);color:var(--orange)}
+.st-pill{cursor:pointer;user-select:none;transition:opacity .15s}
+.st-pill:hover{opacity:.75}
+.pill-detail{display:none;margin-top:6px;background:var(--surface2,#161b22);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:11px;max-height:160px;overflow-y:auto}
+.pill-detail.open{display:block}
+.pill-detail-row{display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid var(--border)}
+.pill-detail-row:last-child{border-bottom:none}
+.pill-detail-row a{color:var(--blue);font-weight:600;min-width:60px}
 .st-cancel{background:rgba(248,81,73,.12);color:var(--red)}
 .st-audit{background:rgba(63,185,80,.12);color:var(--green)}
 .franja-pill{padding:2px 6px;border-radius:4px;font-size:10px;background:var(--surface2);color:var(--text2)}
@@ -566,7 +576,7 @@ function updateAnalistaUI(){
 // ── Motor escritorio (sin servidor) ──
 const _MV=['por programar','programado','programada','inbound'];
 const _BL=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada','dispositivos subidos','dispositivos cargados','por auditar','finalizado','finalizada','completado','cancelado','cancelado cliente','cancelado operativo','no ejecutado','reprogramado','reagendado','otro'];
-const _FIN=['finalizado','finalizada','completado','dispositivos subidos','dispositivos cargados','por auditar','cancelado','cancelado cliente','cancelado operativo','no ejecutado'];
+const _FIN=['finalizado','finalizada','completado','dispositivos subidos','dispositivos cargados','por auditar','sin cargar dispositivos','cancelado','cancelado cliente','cancelado operativo','no ejecutado','por reprogramar','reprogramado','reagendado'];
 const _IP=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada'];
 function _ns(x,d=''){return(x!=null&&x!==''&&String(x).toLowerCase()!='null'&&String(x).toLowerCase()!='nan')?String(x).trim():d;}
 function _nsu(x,d='SIN_VALOR'){const s=_ns(x,d);return(!s||s===d)?d:s.toUpperCase();}
@@ -879,29 +889,73 @@ function renderResumen(){
 }
 
 // ── Status pills por técnico ──
-function buildStatusPills(por_estado){
+function buildStatusPills(por_estado, tecnico){
   if(!por_estado||!Object.keys(por_estado).length) return '';
   const MAP = [
-    {keys:['programado','programada','por programar','inbound'],  cls:'st-prog',   icon:'⬜', label:'Prog.'},
-    {keys:['en camino'],                                          cls:'st-camino', icon:'🚗', label:'Camino'},
-    {keys:['en sitio'],                                           cls:'st-sitio',  icon:'🏠', label:'En sitio'},
-    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'], cls:'st-inic', icon:'🔧', label:'Iniciado'},
-    {keys:['por auditar','dispositivos subidos','dispositivos cargados'],            cls:'st-audit', icon:'🔍', label:'Auditar'},
-    {keys:['finalizado','finalizada','completado'],               cls:'st-fin',    icon:'✅', label:'Fin.'},
-    {keys:['cancelado','cancelado cliente','cancelado operativo','no ejecutado'],    cls:'st-cancel', icon:'❌', label:'Cancelado'},
+    {keys:['programado','programada','por programar','inbound'],                      cls:'st-prog',     icon:'⬜', label:'Prog.'},
+    {keys:['en camino'],                                                              cls:'st-camino',   icon:'🚗', label:'En camino'},
+    {keys:['en sitio'],                                                               cls:'st-sitio',    icon:'🏠', label:'En sitio'},
+    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'],  cls:'st-inic',     icon:'🔧', label:'En ejec.'},
+    {keys:['por auditar','dispositivos subidos','dispositivos cargados'],              cls:'st-audit',    icon:'🔍', label:'Por auditar'},
+    {keys:['sin cargar dispositivos'],                                                cls:'st-sindev',   icon:'⚠️', label:'Sin dispositivos'},
+    {keys:['finalizado','finalizada','completado'],                                   cls:'st-fin',      icon:'✅', label:'Fin.'},
+    {keys:['cancelado','cancelado cliente','cancelado operativo','no ejecutado'],      cls:'st-cancel',   icon:'❌', label:'Cancelado'},
+    {keys:['por reprogramar','reprogramado','reagendado'],                            cls:'st-reprogram',icon:'🔄', label:'Reprogramado'},
   ];
   const pills = [];
+  let pillIdx = 0;
+  const techKey = (tecnico||'').replace(/['"]/g,'_');
   MAP.forEach(group=>{
     let cnt=0;
     group.keys.forEach(k=>{ cnt += por_estado[k]||0; });
-    if(cnt>0) pills.push(`<span class="st-pill ${group.cls}">${group.icon} ${group.label} <strong>${cnt}</strong></span>`);
+    if(cnt>0){
+      const pid=`pill-${techKey}-${pillIdx++}`;
+      const keysJson=JSON.stringify(group.keys).replace(/"/g,"'");
+      pills.push(`<span id="${pid}" class="st-pill ${group.cls}" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">${group.icon} ${group.label} <strong>${cnt}</strong></span>`);
+    }
   });
   // Estados no mapeados
   const mapped = MAP.flatMap(g=>g.keys);
   Object.entries(por_estado).forEach(([k,v])=>{
-    if(!mapped.includes(k)&&v>0) pills.push(`<span class="st-pill st-fin">• ${esc(k)} <strong>${v}</strong></span>`);
+    if(!mapped.includes(k)&&v>0){
+      const pid=`pill-${techKey}-${pillIdx++}`;
+      const keysJson=JSON.stringify([k]).replace(/"/g,"'");
+      pills.push(`<span id="${pid}" class="st-pill st-fin" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">• ${esc(k)} <strong>${v}</strong></span>`);
+    }
   });
   return pills.join('');
+}
+
+function togglePillDetail(pill){
+  const techName = pill.dataset.tech;
+  const keys = JSON.parse(pill.dataset.keys.replace(/'/g,'"'));
+  const pillsDiv = pill.closest('.status-pills');
+  const detailId = 'det-'+pill.id;
+  let det = pillsDiv.querySelector('#'+detailId);
+  if(!det){
+    det = document.createElement('div');
+    det.id = detailId;
+    det.className = 'pill-detail';
+    pillsDiv.parentElement.insertBefore(det, pillsDiv.nextSibling);
+  }
+  if(det.classList.contains('open')){det.classList.remove('open');return;}
+  const allOrds=[...(DATA.ordenes_movibles||[]),...(DATA.ordenes_bloqueadas||[])];
+  const match=allOrds.filter(o=>{
+    if((o.tecnico||'SIN_ASIGNAR')!==techName) return false;
+    const s=_normSt(o.estado);
+    return keys.some(k=>s.includes(k));
+  });
+  if(!match.length){det.innerHTML='<em style="color:var(--text3)">Sin órdenes</em>';}
+  else{
+    det.innerHTML=match.map(o=>`<div class="pill-detail-row">
+      <a href="https://admin.somosinternet.com/appointments/${esc(o.id)}" target="_blank">#${esc(o.id)}</a>
+      <span style="color:var(--text2)">${esc(o.franja||'')}</span>
+      <span style="color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px">${esc(o.direccion||o.zona||'')}</span>
+    </div>`).join('');
+  }
+  // Close other open details for same card
+  pill.closest('.tech-card').querySelectorAll('.pill-detail.open').forEach(d=>{if(d.id!==detailId)d.classList.remove('open');});
+  det.classList.add('open');
 }
 
 // ── Técnicos ──
@@ -937,7 +991,7 @@ function renderTecnicos(){
     const max=6; const pct=Math.min(100,Math.round((t.total/max)*100));
     const color = t.sobrecarga?'fill-red': pct>60?'fill-yellow':'fill-green';
     const franjas = Object.entries(t.franjas||{}).map(([f,c])=>`<span class="franja-pill ${c>=2?'dup':''}">${esc(f)} ×${c}</span>`).join('');
-    const statusPills = buildStatusPills(t.por_estado||{});
+    const statusPills = buildStatusPills(t.por_estado||{}, t.tecnico);
     html += `
       <div class="tech-card ${t.sobrecarga?'sobrecarga':''}">
         <div class="tech-name">
@@ -949,7 +1003,7 @@ function renderTecnicos(){
         <div class="tech-stats">
           <div class="tech-stat"><span class="val">${t.total}</span><span class="lbl">Total</span></div>
           <div class="tech-stat"><span class="val" style="color:var(--green)">${t.movibles}</span><span class="lbl">Prog.</span></div>
-          <div class="tech-stat"><span class="val" style="color:var(--yellow)">${t.activas}</span><span class="lbl">En ruta</span></div>
+          <div class="tech-stat"><span class="val" style="color:${t.activas>0?'var(--orange)':('var(--text3)')}">${t.activas}</span><span class="lbl">En ejec.</span></div>
           <div class="tech-stat"><span class="val" style="color:var(--text3)">${t.finalizadas}</span><span class="lbl">Fin.</span></div>
         </div>
         <div class="status-pills">${statusPills}</div>

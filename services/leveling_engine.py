@@ -25,6 +25,34 @@ from services.normalization import (
 
 logger = logging.getLogger(__name__)
 
+# ─── Peso por tipo de orden (horas estimadas) ─────────────────────────────────
+# Instalación toma ~2h; soporte ~1.5h; adds y reubicación ~1h.
+# Úsado para detectar desequilibrio real de carga aunque el conteo sea igual.
+TIPO_PESO: dict = {
+    "instalacion":      2.0,
+    "instalación":      2.0,
+    "soporte":          1.5,
+    "reubicacion":      1.5,
+    "reubicación":      1.5,
+    "desinstalacion":   1.5,
+    "desinstalación":   1.5,
+    "upgrade somos pro":1.0,
+}
+# Prefijos add: siempre pesan 1.0 — se detectan por starts-with
+_TIPO_ADD_PREFIX = "add:"
+
+def _tipo_peso(tipo: str) -> float:
+    """Devuelve el peso en horas estimadas según tipo de orden."""
+    t = (tipo or "").strip().lower()
+    if t.startswith(_TIPO_ADD_PREFIX):
+        return 1.0
+    return TIPO_PESO.get(t, 1.0)
+
+def _weighted_load(tech: str, tech_orders: dict) -> float:
+    """Carga ponderada de un técnico: suma de pesos de sus órdenes movibles."""
+    return sum(_tipo_peso(o.get("tipo", "")) for o in tech_orders.get(tech, []) if o.get("movible"))
+
+
 # ─── Utilidades internas ──────────────────────
 
 def _count_duplicated_slots(franja_counts: dict) -> int:
@@ -758,6 +786,20 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
     if order["subzona"] not in tech_subzones.get(receiver, set()) and recv_subzones >= 3:
         score -= FRAGMENTATION_PENALTY * 0.3
 
+    # ─── Bonus por balanceo de tipo: instalación → técnico con carga ligera ───
+    # Si el donor tiene muchas instalaciones y el receptor tiene carga ligera (adds),
+    # la sugerencia alivia productividad real aunque el conteo sea igual.
+    if donor not in ("SIN_ASIGNAR", None):
+        donor_w  = _weighted_load(donor, tech_orders)
+        recv_w   = _weighted_load(receiver, tech_orders)
+        order_w  = _tipo_peso(order.get("tipo", ""))
+        if order_w >= 2.0 and donor_w - recv_w >= 2.0:
+            # Mover instalación del técnico sobrecargado al ligero: bonus fuerte
+            score += 800
+        elif order_w <= 1.0 and recv_w - donor_w >= 2.0:
+            # Mover add hacia técnico ya cargado: penalizar
+            score -= 400
+
     return score
 
 
@@ -1309,6 +1351,124 @@ def _generate_swap_suggestions(orders: list, idx: dict) -> list:
     return swaps[:20]
 
 
+# ─── Intercambios por tipo de orden ──────────────────────────────────────────
+
+def _generate_type_balance_swaps(orders: list, idx: dict) -> list:
+    """
+    Detecta desequilibrio de carga REAL cuando un técnico tiene muchas instalaciones
+    (~2h c/u) y otro tiene adds (~1h c/u) que están geográficamente cerca.
+    Sugiere intercambio: el técnico con instalaciones cede una al técnico con adds,
+    y el de adds cede uno de sus orders al de instalaciones.
+    Condiciones: misma franja, distancia < 3km entre las órdenes, carga ponderada
+    del donor supera al receptor en ≥2h.
+    """
+    tech_orders    = idx["tech_orders"]
+    tech_locs      = idx["tech_locs"]
+    tech_main_zone = idx["tech_main_zone"]
+    techs = [t for t in tech_orders if t != "SIN_ASIGNAR"]
+
+    swaps = []
+    seen_pairs: set = set()
+
+    for i, tech_a in enumerate(techs):
+        orders_a = [o for o in tech_orders.get(tech_a, []) if o.get("movible")]
+        if not orders_a:
+            continue
+        instalaciones_a = [o for o in orders_a if _tipo_peso(o.get("tipo","")) >= 2.0]
+        if len(instalaciones_a) < 3:          # Solo si tiene muchas instalaciones
+            continue
+        w_a = _weighted_load(tech_a, tech_orders)
+
+        for tech_b in techs:
+            if tech_b == tech_a:
+                continue
+            orders_b = [o for o in tech_orders.get(tech_b, []) if o.get("movible")]
+            if not orders_b:
+                continue
+            adds_b = [o for o in orders_b if _tipo_peso(o.get("tipo","")) <= 1.0]
+            if not adds_b:                     # Solo si tech_b tiene adds/ligeras
+                continue
+            w_b = _weighted_load(tech_b, tech_orders)
+            if w_a - w_b < 2.0:               # Gap mínimo de 2h para que valga
+                continue
+
+            # Buscar pares en misma franja y cercanos
+            b_by_franja: dict = {}
+            for o in adds_b:
+                b_by_franja.setdefault(o["franja"], []).append(o)
+
+            for order_x in instalaciones_a:
+                franja = order_x["franja"]
+                candidates = b_by_franja.get(franja, [])
+                if not candidates:
+                    continue
+
+                for order_y in candidates:
+                    pair_key = (
+                        min(str(order_x["id"]), str(order_y["id"])),
+                        max(str(order_x["id"]), str(order_y["id"])),
+                    )
+                    if pair_key in seen_pairs:
+                        continue
+
+                    # Verificar proximidad geográfica
+                    dist = None
+                    if order_x.get("lat") and order_x.get("lon") and order_y.get("lat") and order_y.get("lon"):
+                        dist = haversine(order_x["lat"], order_x["lon"], order_y["lat"], order_y["lon"])
+
+                    if dist is not None and dist > 3.0:
+                        continue   # Muy lejos para que valga el intercambio
+
+                    seen_pairs.add(pair_key)
+
+                    # Carga ponderada tras el intercambio
+                    w_a_after = w_a - _tipo_peso(order_x.get("tipo","")) + _tipo_peso(order_y.get("tipo",""))
+                    w_b_after = w_b - _tipo_peso(order_y.get("tipo","")) + _tipo_peso(order_x.get("tipo",""))
+                    mejora_h = (w_a - w_b) - (w_a_after - w_b_after)
+
+                    if mejora_h < 0.5:
+                        continue   # Si no mejora al menos 30min, no vale
+
+                    zona_x = order_x.get("zona", "")
+                    zona_y = order_y.get("zona", "")
+                    dist_txt = f" | Distancia entre órdenes: {dist:.1f}km" if dist is not None else ""
+                    motivo = (
+                        f"⚖️ Balanceo de carga por tipo — franja {franja}: "
+                        f"{tech_a} cede instalación #{order_x['id']} ({zona_x}) → {tech_b} | "
+                        f"{tech_b} cede add/ligera #{order_y['id']} ({zona_y}) → {tech_a}. "
+                        f"Ahorro estimado: {mejora_h:.1f}h de diferencia de carga{dist_txt}."
+                    )
+                    score = mejora_h * 500 + (1 if dist is None else max(0, 3.0 - dist) * 300)
+
+                    swaps.append({
+                        "tipo_sugerencia":    "INTERCAMBIO_TIPO",
+                        "orden":              order_x["id"],
+                        "orden_b":            order_y["id"],
+                        "tecnico_actual":     tech_a,
+                        "tecnico_sugerido":   tech_b,
+                        "tecnico_b_actual":   tech_b,
+                        "tecnico_b_sugerido": tech_a,
+                        "franja_actual":      franja,
+                        "franja_sugerida":    franja,
+                        "zona":               zona_x,
+                        "zona_b":             zona_y,
+                        "tipo":               order_x.get("tipo", ""),
+                        "tipo_b":             order_y.get("tipo", ""),
+                        "estado":             order_x["estado"],
+                        "riesgo":             "bajo" if mejora_h >= 1.5 else "medio",
+                        "motivo":             motivo,
+                        "beneficio":          f"Equilibra carga real: {tech_a} baja {_tipo_peso(order_x.get('tipo','')):.0f}h, {tech_b} la asume con capacidad disponible",
+                        "score":              round(score, 1),
+                        "mejora_horas":       round(mejora_h, 2),
+                        "dist_km":            round(dist, 2) if dist is not None else None,
+                        "interzona":          zona_x != zona_y,
+                        "aviso_sobrecarga":   False,
+                    })
+
+    swaps.sort(key=lambda x: x["score"], reverse=True)
+    return swaps[:10]
+
+
 # ─── Punto de entrada principal ──────────────
 
 def run_leveling(raw_orders: list) -> dict:
@@ -1343,6 +1503,10 @@ def run_leveling(raw_orders: list) -> dict:
 
     # 5c. Intercambios bidireccionales (A↔B misma franja)
     swap_suggestions = _generate_swap_suggestions(orders, idx)
+    type_balance_swaps = _generate_type_balance_swaps(orders, idx)
+    # Merge: type-balance swaps go first (they address real-time productivity)
+    swap_suggestions = type_balance_swaps + [s for s in swap_suggestions
+                                              if s["tipo_sugerencia"] != "INTERCAMBIO_TIPO"]
 
     # 6. Carga por técnico
     carga_por_tecnico = []

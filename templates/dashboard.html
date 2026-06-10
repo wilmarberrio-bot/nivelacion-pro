@@ -471,9 +471,19 @@ tr:hover td{background:var(--surface2)}
         <option value="descartada">Descartadas</option>
         <option value="todas">Todas</option>
       </select>
-      <select id="f-sug-zona" onchange="renderSugerencias();renderIntercambios()">
-        <option value="">Todas las zonas</option>
-      </select>
+      <div style="position:relative;display:inline-block">
+        <button class="ts-toggle" id="f-sug-zona-btn" onclick="toggleZonaChecklist()" style="min-width:140px">
+          <span id="f-sug-zona-label">🗺 Todas las zonas</span>
+        </button>
+        <div class="tech-checklist" id="f-sug-zona-panel" style="min-width:180px">
+          <div class="ts-search"><input type="text" placeholder="Buscar zona..." oninput="filterZonaChecklist(this)"></div>
+          <div id="f-sug-zona-list" style="max-height:200px;overflow-y:auto"></div>
+          <div style="display:flex;gap:4px;padding:4px 6px;border-top:1px solid var(--border)">
+            <button onclick="selectAllZonas()" style="flex:1;font-size:11px">✓ Todas</button>
+            <button onclick="clearZonas()" style="flex:1;font-size:11px">✗ Ninguna</button>
+          </div>
+        </div>
+      </div>
       <select id="f-sug-riesgo" onchange="renderSugerencias()">
         <option value="">Todos los riesgos</option>
         <option value="bajo">🟢 Riesgo bajo</option>
@@ -788,6 +798,73 @@ async function uploadExcel(input){
     toast('Error con Excel: '+e.message, 'error');
   }
   input.value='';
+}
+
+// ── Multi-zona filter ──
+let _ZONA_FILTER = new Set(); // empty = todas
+
+function _getSelectedZonas(){
+  return _ZONA_FILTER; // Set of uppercase zona strings; empty = show all
+}
+
+function _buildZonaChecklist(zonas){
+  const list = document.getElementById('f-sug-zona-list');
+  if(!list) return;
+  list.innerHTML = zonas.map(z=>`
+    <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:12px">
+      <input type="checkbox" value="${esc(z)}" ${_ZONA_FILTER.size===0||_ZONA_FILTER.has(z.toUpperCase())?'checked':''} onchange="_onZonaCheck()">
+      ${esc(z)}
+    </label>`).join('');
+  _updateZonaLabel();
+}
+
+function _onZonaCheck(){
+  const checks = document.querySelectorAll('#f-sug-zona-list input[type=checkbox]');
+  _ZONA_FILTER = new Set();
+  checks.forEach(c=>{ if(c.checked) _ZONA_FILTER.add(c.value.toUpperCase()); });
+  // If all checked → treat as "all" (empty set = no filter)
+  const total = checks.length;
+  if(_ZONA_FILTER.size === total) _ZONA_FILTER = new Set();
+  _updateZonaLabel();
+  renderSugerencias(); renderIntercambios();
+}
+
+function _updateZonaLabel(){
+  const lbl = document.getElementById('f-sug-zona-label');
+  if(!lbl) return;
+  if(_ZONA_FILTER.size === 0) lbl.textContent = '🗺 Todas las zonas';
+  else if(_ZONA_FILTER.size === 1) lbl.textContent = '🗺 ' + [..._ZONA_FILTER][0];
+  else lbl.textContent = `🗺 ${_ZONA_FILTER.size} zonas`;
+}
+
+function toggleZonaChecklist(){
+  const panel = document.getElementById('f-sug-zona-panel');
+  if(!panel) return;
+  const isOpen = panel.classList.contains('open');
+  // close all other checklists
+  document.querySelectorAll('.tech-checklist.open').forEach(p=>p.classList.remove('open'));
+  if(!isOpen) panel.classList.add('open');
+}
+
+function filterZonaChecklist(input){
+  const q = input.value.toLowerCase();
+  document.querySelectorAll('#f-sug-zona-list label').forEach(lbl=>{
+    lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function selectAllZonas(){
+  document.querySelectorAll('#f-sug-zona-list input[type=checkbox]').forEach(c=>c.checked=true);
+  _ZONA_FILTER = new Set();
+  _updateZonaLabel();
+  renderSugerencias(); renderIntercambios();
+}
+
+function clearZonas(){
+  document.querySelectorAll('#f-sug-zona-list input[type=checkbox]').forEach(c=>c.checked=false);
+  _ZONA_FILTER = new Set(['__NONE__']); // no match sentinel
+  _updateZonaLabel();
+  renderSugerencias(); renderIntercambios();
 }
 
 // ── Render All ──
@@ -1144,12 +1221,12 @@ function renderSugerencias(){
   let sugs = DATA.sugerencias||[];
   if(TECH_FILTER.size) sugs=sugs.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
   const estadoFilt = document.getElementById('f-sug-estado').value;
-  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
+  const zonaFilt = _getSelectedZonas();
   const riesgoFilt = document.getElementById('f-sug-riesgo').value;
 
   sugs = sugs.map(s=>({...s, sessionStatus: SESSION.applied[s.orden]?'aplicada': SESSION.dismissed[s.orden]?'descartada':'pendiente'}));
   if(estadoFilt!=='todas') sugs=sugs.filter(s=>s.sessionStatus===estadoFilt);
-  if(zonaFilt) sugs=sugs.filter(s=>(s.zona||'').toUpperCase()===zonaFilt);
+  if(zonaFilt.size) sugs=sugs.filter(s=>zonaFilt.has((s.zona||'').toUpperCase()));
   if(riesgoFilt) sugs=sugs.filter(s=>s.riesgo===riesgoFilt);
   // Filtro de exclusión local (no afecta el backend)
   if(EXCLUIDOS_SUGS.size) sugs=sugs.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
@@ -1209,12 +1286,12 @@ function renderSugerencias(){
 function renderIntercambios(){
   if(!DATA) return;
   const intercambios = DATA.intercambios||[];
-  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
+  const zonaFilt = _getSelectedZonas();
   const estadoFilt = document.getElementById('f-sug-estado').value;
 
   let list_data = intercambios;
   if(TECH_FILTER.size) list_data=list_data.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
-  if(zonaFilt) list_data = list_data.filter(s=>(s.zona||'').toUpperCase()===zonaFilt || (s.zona_b||'').toUpperCase()===zonaFilt);
+  if(zonaFilt.size) list_data = list_data.filter(s=>zonaFilt.has((s.zona||'').toUpperCase()) || zonaFilt.has((s.zona_b||'').toUpperCase()));
   if(EXCLUIDOS_SUGS.size) list_data = list_data.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
   if(estadoFilt==='aplicada') list_data = list_data.filter(s=>SESSION.applied['INT_'+s.orden+'_'+s.orden_b]);
   else if(estadoFilt==='descartada') list_data = list_data.filter(s=>SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
@@ -1432,7 +1509,7 @@ function populateFilters(){
   };
   const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
   fillSelect('filter-tech-zona', zonas);
-  fillSelect('f-sug-zona',       zonas);
+  _buildZonaChecklist(zonas);
   // Poblar dropdown de exclusión con todos los técnicos
   const excSel = document.getElementById('f-sug-excluir-select');
   if(excSel){

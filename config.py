@@ -37,7 +37,17 @@ FRANJAS = [
     "10:00-11:30",
     "13:00-14:30",
     "14:30-16:00",
+    "16:00-17:30",   # T2 exclusivo (turno hasta 18:00)
 ]
+
+# Turnos operativos
+T1_START_HOUR = 7.5    # 7:30
+T1_END_HOUR   = 15.5   # 15:30
+T2_START_HOUR = 10.0   # 10:00
+T2_END_HOUR   = 18.0   # 18:00
+T1_FRANJAS    = ["08:00-09:30", "10:00-11:30", "13:00-14:30", "14:30-16:00"]
+T2_FRANJAS    = ["10:00-11:30", "13:00-14:30", "14:30-16:00", "16:00-17:30"]
+ALCANZADO_BUFFER_HOURS = 0.5  # Margen de alerta antes del final del turno
 
 MOVABLE_STATUSES = [
     "por programar",

@@ -20,38 +20,11 @@ from services.normalization import (
     normalize_order, haversine, get_centroid, is_same_unit, order_has_coords,
     parse_franja_hours, get_status_progress, status_effective_weight,
     status_completion_credit, norm_zone, is_movable, is_blocked,
-    norm_status,
+    norm_status, detect_turno,
 )
+from config import T1_END_HOUR, T2_END_HOUR, T1_FRANJAS, T2_FRANJAS, ALCANZADO_BUFFER_HOURS
 
 logger = logging.getLogger(__name__)
-
-# ─── Peso por tipo de orden (horas estimadas) ─────────────────────────────────
-# Instalación toma ~2h; soporte ~1.5h; adds y reubicación ~1h.
-# Úsado para detectar desequilibrio real de carga aunque el conteo sea igual.
-TIPO_PESO: dict = {
-    "instalacion":      2.0,
-    "instalación":      2.0,
-    "soporte":          1.5,
-    "reubicacion":      1.5,
-    "reubicación":      1.5,
-    "desinstalacion":   1.5,
-    "desinstalación":   1.5,
-    "upgrade somos pro":1.0,
-}
-# Prefijos add: siempre pesan 1.0 — se detectan por starts-with
-_TIPO_ADD_PREFIX = "add:"
-
-def _tipo_peso(tipo: str) -> float:
-    """Devuelve el peso en horas estimadas según tipo de orden."""
-    t = (tipo or "").strip().lower()
-    if t.startswith(_TIPO_ADD_PREFIX):
-        return 1.0
-    return TIPO_PESO.get(t, 1.0)
-
-def _weighted_load(tech: str, tech_orders: dict) -> float:
-    """Carga ponderada de un técnico: suma de pesos de sus órdenes movibles."""
-    return sum(_tipo_peso(o.get("tipo", "")) for o in tech_orders.get(tech, []) if o.get("movible"))
-
 
 # ─── Utilidades internas ──────────────────────
 
@@ -232,9 +205,17 @@ def _is_tech_efficient(tech: str, tech_orders: dict, tech_franja: dict,
 
 def _can_add_to_franja(tech: str, franja: str, tech_franja: dict,
                         tech_orders: dict, current_hour: float,
-                        same_unit: bool = False) -> tuple:
+                        same_unit: bool = False, turno: str = "T1") -> tuple:
     franja_start, franja_end = parse_franja_hours(franja)
     current_in_slot = tech_franja.get(tech, {}).get(franja, 0)
+
+    # ── Regla de turno: T1 no puede atender franjas 16:00+ (termina 15:30) ──
+    if franja_start is not None and franja_start >= 16.0 and turno == "T1":
+        return False, "Técnico T1 no disponible en franja 16:00+ (turno hasta 15:30)"
+    # T2 no puede atender franja 08:00-09:30 (empieza a las 10:00)
+    if franja_start is not None and franja_start < 9.5 and turno == "T2":
+        return False, "Técnico T2 no disponible en franja 08:00 (turno desde 10:00)"
+
 
     if current_in_slot >= MAX_ORDERS_PER_SLOT:
         return False, "Ya tiene 2 órdenes en esta franja"
@@ -325,6 +306,12 @@ def _build_indexes(orders: list) -> dict:
         for t, o_list in tech_orders.items()
     }
 
+    # Detectar turno de cada técnico (T1 / T2)
+    tech_turno = {
+        tech: detect_turno(tech, orders_list)
+        for tech, orders_list in tech_orders.items()
+    }
+
     return {
         "tech_orders":         tech_orders,
         "tech_franja":         tech_franja,
@@ -337,6 +324,7 @@ def _build_indexes(orders: list) -> dict:
         "tech_pending":        tech_pending,
         "tech_eff_load":       tech_eff_load,
         "tech_credit":         tech_credit,
+        "tech_turno":          tech_turno,   # "T1" o "T2" por técnico
     }
 
 
@@ -627,6 +615,53 @@ def _generate_alerts(orders: list, idx: dict, now_dt) -> list:
                 ),
             })
 
+
+    # ── 7. Alerta ALCANZADO: técnico con más trabajo del que puede completar en su turno ──
+    tech_turno = idx.get("tech_turno", {})
+    TIPO_PESO_ALERTA = {"instalacion":2.0,"instalación":2.0,"soporte":1.5,"reubicacion":1.5,
+                         "reubicación":1.5,"desinstalacion":1.5,"desinstalación":1.5,
+                         "upgrade":1.0,"adicion":1.0,"adición":1.0,"traslado":1.5}
+    LUNCH_START, LUNCH_END = 12.0, 13.0
+    for tech, orders_list in tech_orders.items():
+        if tech == "SIN_ASIGNAR":
+            continue
+        turno = tech_turno.get(tech, "T1")
+        shift_end = T2_END_HOUR if turno == "T2" else T1_END_HOUR
+        # Horas útiles restantes (descontar almuerzo si aún no pasó)
+        remaining = max(0.0, shift_end - now_hour)
+        if now_hour < LUNCH_START < shift_end:
+            remaining -= min(LUNCH_END, shift_end) - LUNCH_START
+        remaining = max(0.0, remaining)
+        # Órdenes pendientes reales (no finalizadas ni canceladas)
+        pending_os = [
+            o for o in orders_list
+            if o.get("progress", 0) < 6 and "cancel" not in o.get("estado","").lower()
+        ]
+        if not pending_os:
+            continue
+        time_needed = sum(
+            TIPO_PESO_ALERTA.get(o.get("tipo","").lower(), 1.5)
+            for o in pending_os
+        )
+        exceso = time_needed - (remaining - ALCANZADO_BUFFER_HOURS)
+        if exceso > 0.5:  # al menos 30 min de exceso para alertar
+            alerts.append({
+                "tipo":               "ALCANZADO",
+                "severidad":          "critica" if exceso >= 2.0 else "alta",
+                "tecnico":            tech,
+                "turno":              turno,
+                "horas_necesarias":   round(time_needed, 1),
+                "horas_disponibles":  round(max(0.0, remaining), 1),
+                "exceso_horas":       round(exceso, 1),
+                "ordenes_pendientes": len(pending_os),
+                "detalle":            (
+                    f"{tech} ({turno}) necesita ~{time_needed:.1f}h pero quedan "
+                    f"{remaining:.1f}h de turno — exceso {exceso:.1f}h con "
+                    f"{len(pending_os)} órdenes pendientes"
+                ),
+                "franja": "",
+            })
+
     return alerts
 
 
@@ -786,20 +821,6 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
     if order["subzona"] not in tech_subzones.get(receiver, set()) and recv_subzones >= 3:
         score -= FRAGMENTATION_PENALTY * 0.3
 
-    # ─── Bonus por balanceo de tipo: instalación → técnico con carga ligera ───
-    # Si el donor tiene muchas instalaciones y el receptor tiene carga ligera (adds),
-    # la sugerencia alivia productividad real aunque el conteo sea igual.
-    if donor not in ("SIN_ASIGNAR", None):
-        donor_w  = _weighted_load(donor, tech_orders)
-        recv_w   = _weighted_load(receiver, tech_orders)
-        order_w  = _tipo_peso(order.get("tipo", ""))
-        if order_w >= 2.0 and donor_w - recv_w >= 2.0:
-            # Mover instalación del técnico sobrecargado al ligero: bonus fuerte
-            score += 800
-        elif order_w <= 1.0 and recv_w - donor_w >= 2.0:
-            # Mover add hacia técnico ya cargado: penalizar
-            score -= 400
-
     return score
 
 
@@ -856,6 +877,14 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
                 continue
             if sugs_por_receptor.get(receiver, 0) >= MAX_SUGS_RECEPTOR:
                 continue  # Ya acumuló suficientes sugerencias individuales
+
+            # ── Compatibilidad de turno con franja de la orden ──
+            order_franja_start = parse_franja_hours(order.get("franja",""))[0] or 0
+            recv_turno = idx.get("tech_turno",{}).get(receiver,"T1")
+            if recv_turno == "T1" and order_franja_start >= 16.0:
+                continue  # T1 no puede atender 16:00+ (turno hasta 15:30)
+            if recv_turno == "T2" and order_franja_start < 9.5:
+                continue  # T2 no disponible en franja 08:00 (empieza 10:00)
 
             score = _score_suggestion(order, donor, receiver, idx, current_hour)
             if score > best_score:
@@ -1351,124 +1380,6 @@ def _generate_swap_suggestions(orders: list, idx: dict) -> list:
     return swaps[:20]
 
 
-# ─── Intercambios por tipo de orden ──────────────────────────────────────────
-
-def _generate_type_balance_swaps(orders: list, idx: dict) -> list:
-    """
-    Detecta desequilibrio de carga REAL cuando un técnico tiene muchas instalaciones
-    (~2h c/u) y otro tiene adds (~1h c/u) que están geográficamente cerca.
-    Sugiere intercambio: el técnico con instalaciones cede una al técnico con adds,
-    y el de adds cede uno de sus orders al de instalaciones.
-    Condiciones: misma franja, distancia < 3km entre las órdenes, carga ponderada
-    del donor supera al receptor en ≥2h.
-    """
-    tech_orders    = idx["tech_orders"]
-    tech_locs      = idx["tech_locs"]
-    tech_main_zone = idx["tech_main_zone"]
-    techs = [t for t in tech_orders if t != "SIN_ASIGNAR"]
-
-    swaps = []
-    seen_pairs: set = set()
-
-    for i, tech_a in enumerate(techs):
-        orders_a = [o for o in tech_orders.get(tech_a, []) if o.get("movible")]
-        if not orders_a:
-            continue
-        instalaciones_a = [o for o in orders_a if _tipo_peso(o.get("tipo","")) >= 2.0]
-        if len(instalaciones_a) < 3:          # Solo si tiene muchas instalaciones
-            continue
-        w_a = _weighted_load(tech_a, tech_orders)
-
-        for tech_b in techs:
-            if tech_b == tech_a:
-                continue
-            orders_b = [o for o in tech_orders.get(tech_b, []) if o.get("movible")]
-            if not orders_b:
-                continue
-            adds_b = [o for o in orders_b if _tipo_peso(o.get("tipo","")) <= 1.0]
-            if not adds_b:                     # Solo si tech_b tiene adds/ligeras
-                continue
-            w_b = _weighted_load(tech_b, tech_orders)
-            if w_a - w_b < 2.0:               # Gap mínimo de 2h para que valga
-                continue
-
-            # Buscar pares en misma franja y cercanos
-            b_by_franja: dict = {}
-            for o in adds_b:
-                b_by_franja.setdefault(o["franja"], []).append(o)
-
-            for order_x in instalaciones_a:
-                franja = order_x["franja"]
-                candidates = b_by_franja.get(franja, [])
-                if not candidates:
-                    continue
-
-                for order_y in candidates:
-                    pair_key = (
-                        min(str(order_x["id"]), str(order_y["id"])),
-                        max(str(order_x["id"]), str(order_y["id"])),
-                    )
-                    if pair_key in seen_pairs:
-                        continue
-
-                    # Verificar proximidad geográfica
-                    dist = None
-                    if order_x.get("lat") and order_x.get("lon") and order_y.get("lat") and order_y.get("lon"):
-                        dist = haversine(order_x["lat"], order_x["lon"], order_y["lat"], order_y["lon"])
-
-                    if dist is not None and dist > 3.0:
-                        continue   # Muy lejos para que valga el intercambio
-
-                    seen_pairs.add(pair_key)
-
-                    # Carga ponderada tras el intercambio
-                    w_a_after = w_a - _tipo_peso(order_x.get("tipo","")) + _tipo_peso(order_y.get("tipo",""))
-                    w_b_after = w_b - _tipo_peso(order_y.get("tipo","")) + _tipo_peso(order_x.get("tipo",""))
-                    mejora_h = (w_a - w_b) - (w_a_after - w_b_after)
-
-                    if mejora_h < 0.5:
-                        continue   # Si no mejora al menos 30min, no vale
-
-                    zona_x = order_x.get("zona", "")
-                    zona_y = order_y.get("zona", "")
-                    dist_txt = f" | Distancia entre órdenes: {dist:.1f}km" if dist is not None else ""
-                    motivo = (
-                        f"⚖️ Balanceo de carga por tipo — franja {franja}: "
-                        f"{tech_a} cede instalación #{order_x['id']} ({zona_x}) → {tech_b} | "
-                        f"{tech_b} cede add/ligera #{order_y['id']} ({zona_y}) → {tech_a}. "
-                        f"Ahorro estimado: {mejora_h:.1f}h de diferencia de carga{dist_txt}."
-                    )
-                    score = mejora_h * 500 + (1 if dist is None else max(0, 3.0 - dist) * 300)
-
-                    swaps.append({
-                        "tipo_sugerencia":    "INTERCAMBIO_TIPO",
-                        "orden":              order_x["id"],
-                        "orden_b":            order_y["id"],
-                        "tecnico_actual":     tech_a,
-                        "tecnico_sugerido":   tech_b,
-                        "tecnico_b_actual":   tech_b,
-                        "tecnico_b_sugerido": tech_a,
-                        "franja_actual":      franja,
-                        "franja_sugerida":    franja,
-                        "zona":               zona_x,
-                        "zona_b":             zona_y,
-                        "tipo":               order_x.get("tipo", ""),
-                        "tipo_b":             order_y.get("tipo", ""),
-                        "estado":             order_x["estado"],
-                        "riesgo":             "bajo" if mejora_h >= 1.5 else "medio",
-                        "motivo":             motivo,
-                        "beneficio":          f"Equilibra carga real: {tech_a} baja {_tipo_peso(order_x.get('tipo','')):.0f}h, {tech_b} la asume con capacidad disponible",
-                        "score":              round(score, 1),
-                        "mejora_horas":       round(mejora_h, 2),
-                        "dist_km":            round(dist, 2) if dist is not None else None,
-                        "interzona":          zona_x != zona_y,
-                        "aviso_sobrecarga":   False,
-                    })
-
-    swaps.sort(key=lambda x: x["score"], reverse=True)
-    return swaps[:10]
-
-
 # ─── Punto de entrada principal ──────────────
 
 def run_leveling(raw_orders: list) -> dict:
@@ -1503,10 +1414,6 @@ def run_leveling(raw_orders: list) -> dict:
 
     # 5c. Intercambios bidireccionales (A↔B misma franja)
     swap_suggestions = _generate_swap_suggestions(orders, idx)
-    type_balance_swaps = _generate_type_balance_swaps(orders, idx)
-    # Merge: type-balance swaps go first (they address real-time productivity)
-    swap_suggestions = type_balance_swaps + [s for s in swap_suggestions
-                                              if s["tipo_sugerencia"] != "INTERCAMBIO_TIPO"]
 
     # 6. Carga por técnico
     carga_por_tecnico = []
@@ -1531,8 +1438,10 @@ def run_leveling(raw_orders: list) -> dict:
                 _c = _o.get("ciudad", "") or ""
                 if _c and _c.upper() not in ("SIN_ZONA", ""):
                     zona_display = _c.upper(); break
+        turno_t = idx.get("tech_turno",{}).get(tech,"T1")
         carga_por_tecnico.append({
             "tecnico":    tech,
+            "turno":      turno_t,
             "zona":       zona_display,
             "total":      total,
             "movibles":   movibles_t,

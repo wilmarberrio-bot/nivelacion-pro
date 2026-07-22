@@ -1,4 +1,3 @@
-
 """services/normalization.py - Normalizacion de estados, franjas, zonas y coordenadas"""
 import re, math
 from config import (MOVABLE_STATUSES,BLOCKED_STATUSES,NEAR_FINISH_STATUSES,
@@ -22,6 +21,9 @@ def norm_franja(x):
     clean=s.replace(" ","")
     for f in FRANJAS:
         if f.replace(" ","")==clean: return f
+    # Mapear variantes comunes de franja T2
+    T2_MAP = {"16:00-17:30":"16:00-17:30","16:00-18:00":"16:00-17:30","16:00-17:00":"16:00-17:30"}
+    if clean in T2_MAP: return T2_MAP[clean]
     return s
 def parse_franja_hours(franja_str):
     if not franja_str or franja_str=="Sin Franja": return None,None
@@ -111,3 +113,29 @@ def normalize_order(order):
     o["addr_key"]=build_address_key(o.get("direccion",""),o["subzona"])
     o["movible"]=o["estado_clase"]=="movible"
     return o
+
+
+def detect_turno(tech: str, tech_orders_list: list) -> str:
+    """
+    Detecta si un técnico es T1 o T2 según sus franjas asignadas.
+    - T1: tiene alguna orden 08:00-09:30 → comienza a las 7:30, termina 15:30
+    - T2: todas sus órdenes son 10:00+ → comienza a las 10:00, termina 18:00
+    Se detecta automáticamente sin necesidad de un campo externo.
+    """
+    if not tech_orders_list:
+        return "T1"
+    franjas = [o.get("franja", "") for o in tech_orders_list if o.get("franja") and o.get("franja") != "Sin Franja"]
+    if not franjas:
+        return "T1"
+    # T1: si tiene al menos una orden madrugadora (08:00-09:30)
+    if any("08:00" in f for f in franjas):
+        return "T1"
+    # T2: todas las órdenes arrancan a las 10:00 o más tarde
+    starts = []
+    for f in franjas:
+        h, _ = parse_franja_hours(f)
+        if h is not None:
+            starts.append(h)
+    if starts and min(starts) >= 10.0:
+        return "T2"
+    return "T1"

@@ -37,17 +37,8 @@ FRANJAS = [
     "10:00-11:30",
     "13:00-14:30",
     "14:30-16:00",
-    "16:00-17:30",   # T2 exclusivo (turno hasta 18:00)
+    "16:00-17:30",   # T2 exclusiva
 ]
-
-# Turnos operativos
-T1_START_HOUR = 7.5    # 7:30
-T1_END_HOUR   = 15.5   # 15:30
-T2_START_HOUR = 10.0   # 10:00
-T2_END_HOUR   = 18.0   # 18:00
-T1_FRANJAS    = ["08:00-09:30", "10:00-11:30", "13:00-14:30", "14:30-16:00"]
-T2_FRANJAS    = ["10:00-11:30", "13:00-14:30", "14:30-16:00", "16:00-17:30"]
-ALCANZADO_BUFFER_HOURS = 0.5  # Margen de alerta antes del final del turno
 
 MOVABLE_STATUSES = [
     "por programar",
@@ -127,7 +118,8 @@ STATUS_PROGRESS = {
 
 PROGRESS_FINALIZED = 6
 
-MIN_IDEAL_LOAD               = 3
+# ── Carga operativa ──────────────────────────────────────────────────
+MIN_IDEAL_LOAD               = 4   # mínimo operativo real (antes 3)
 MAX_IDEAL_LOAD               = 5
 MAX_ABSOLUTE_LOAD            = 6
 MAX_ORDERS_PER_SLOT          = 2
@@ -135,8 +127,40 @@ MAX_DUPLICATED_SLOTS         = 1
 MIN_IMBALANCE_TO_MOVE        = 2
 ORDER_DURATION_HOURS         = 1.0
 MAX_ORDER_DURATION_HOURS     = 1.5
-MAX_ALLOWED_DISTANCE_KM      = 8.0
+MAX_ALLOWED_DISTANCE_KM      = 2.5  # cap geográfico primario (antes 8.0)
+MAX_DIST_EXCEPTION_KM        = 4.0  # excepción justificada (geo aislado)
 MAX_SUBZONES_SOFT            = 3
+
+# ── Turnos T1 / T2 ──────────────────────────────────────────────────
+T1_START_HOUR          = 7.5    # 07:30
+T1_END_HOUR            = 15.5   # 15:30
+T2_START_HOUR          = 10.0   # 10:00
+T2_END_HOUR            = 18.0   # 18:00
+# T1 y T2 almuerzan igual: 11:30 a 12:30
+LUNCH_START_T1         = 11.5   # T1 almuerza 11:30
+LUNCH_END_T1           = 12.5   # T1 sale de almuerzo 12:30
+LUNCH_START_T2         = 11.5   # T2 almuerza 11:30
+LUNCH_END_T2           = 12.5   # T2 sale de almuerzo 12:30
+LUNCH_START            = 11.5   # alias genérico
+LUNCH_END              = 12.5
+T2_MAX_ORDERS_10H_SLOT = 1      # T2: máx 1 orden en 10:00-11:30 (almuerza 11:30)
+ALCANZADO_BUFFER_HOURS = 0.5    # margen antes de marcar ALCANZADO
+
+T1_FRANJAS = [
+    "08:00-09:30",
+    "10:00-11:30",
+    "13:00-14:30",
+    "14:30-16:00",
+]
+T2_FRANJAS = [
+    "10:00-11:30",
+    "13:00-14:30",
+    "14:30-16:00",
+    "16:00-17:30",
+]
+
+# Ruta al CSV maestro de turnos dentro del repo
+TURNOS_CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "turnos.csv")
 
 ONSITE_ALERT_MINUTES             = int(os.environ.get("ONSITE_ALERT_MINUTES",            "30"))
 INICIADO_ALERT_MINUTES           = int(os.environ.get("INICIADO_ALERT_MINUTES",          "90"))
@@ -156,6 +180,13 @@ NEARBY_BUILDING_RADIUS_KM          = 0.25
 MAX_SWAP_DISTANCE_INCREASE_KM      = 2.0
 MIN_SAVED_KM_FOR_SWAP              = 0.5
 MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
+
+# Ponderaciones de score para sugerencias
+GEO_BONUS_0_5KM    = 1500   # < 0.5 km — misma cuadra prácticamente
+GEO_BONUS_1KM      = 900    # < 1 km
+GEO_BONUS_2KM      = 400    # < 2 km
+GEO_PENALTY_OVER   = 5000   # > MAX_ALLOWED_DISTANCE_KM
+FRANJA_DUP_PENALTY = 800    # ya tiene orden en esa franja (era bloqueo duro)
 
 ZONE_ADJACENCY = {
     "MEDELLIN":    ["BELLO", "ENVIGADO", "ITAGUI", "SABANETA"],

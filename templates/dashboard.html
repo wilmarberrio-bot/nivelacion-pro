@@ -146,6 +146,7 @@ tr:hover td{background:var(--surface2)}
 .tech-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px}
 .tech-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px}
 .tech-card.sobrecarga{border-color:var(--red)}
+.tech-card.alcanzado{border-color:var(--orange);background:rgba(255,166,87,.04)}
 .tech-name{font-weight:600;font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
 .tech-name .overload-dot{width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0}
 .tech-zone{font-size:11px;color:var(--text3);margin-bottom:8px}
@@ -166,16 +167,6 @@ tr:hover td{background:var(--surface2)}
 .st-sitio{background:rgba(255,166,87,.15);color:var(--orange)}
 .st-inic{background:rgba(188,140,255,.15);color:var(--purple)}
 .st-fin{background:rgba(110,118,129,.12);color:var(--text3)}
-.st-sindev{background:rgba(255,100,80,.15);color:#f08080}
-.st-reprogram{background:rgba(180,120,255,.15);color:#b47aff}
-.st-ejec{background:rgba(255,140,0,.15);color:var(--orange)}
-.st-pill{cursor:pointer;user-select:none;transition:opacity .15s}
-.st-pill:hover{opacity:.75}
-.pill-detail{display:none;margin-top:6px;background:var(--surface2,#161b22);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:11px;max-height:160px;overflow-y:auto}
-.pill-detail.open{display:block}
-.pill-detail-row{display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid var(--border)}
-.pill-detail-row:last-child{border-bottom:none}
-.pill-detail-row a{color:var(--blue);font-weight:600;min-width:60px}
 .st-cancel{background:rgba(248,81,73,.12);color:var(--red)}
 .st-audit{background:rgba(63,185,80,.12);color:var(--green)}
 .franja-pill{padding:2px 6px;border-radius:4px;font-size:10px;background:var(--surface2);color:var(--text2)}
@@ -355,6 +346,9 @@ tr:hover td{background:var(--surface2)}
       <select id="filter-tech-sobrecarga" onchange="renderTecnicos()">
         <option value="">Todos</option>
         <option value="sobrecarga">Solo sobrecargados</option>
+        <option value="alcanzado">Solo ALCANZADO</option>
+        <option value="T1">Solo T1</option>
+        <option value="T2">Solo T2</option>
         <option value="capacidad">Con capacidad</option>
       </select>
       </div></div>
@@ -471,19 +465,9 @@ tr:hover td{background:var(--surface2)}
         <option value="descartada">Descartadas</option>
         <option value="todas">Todas</option>
       </select>
-      <div style="position:relative;display:inline-block">
-        <button class="ts-toggle" id="f-sug-zona-btn" onclick="toggleZonaChecklist()" style="min-width:140px">
-          <span id="f-sug-zona-label">🗺 Todas las zonas</span>
-        </button>
-        <div class="tech-checklist" id="f-sug-zona-panel" style="min-width:180px">
-          <div class="ts-search"><input type="text" placeholder="Buscar zona..." oninput="filterZonaChecklist(this)"></div>
-          <div id="f-sug-zona-list" style="max-height:200px;overflow-y:auto"></div>
-          <div style="display:flex;gap:4px;padding:4px 6px;border-top:1px solid var(--border)">
-            <button onclick="selectAllZonas()" style="flex:1;font-size:11px">✓ Todas</button>
-            <button onclick="clearZonas()" style="flex:1;font-size:11px">✗ Ninguna</button>
-          </div>
-        </div>
-      </div>
+      <select id="f-sug-zona" onchange="renderSugerencias();renderIntercambios()">
+        <option value="">Todas las zonas</option>
+      </select>
       <select id="f-sug-riesgo" onchange="renderSugerencias()">
         <option value="">Todos los riesgos</option>
         <option value="bajo">🟢 Riesgo bajo</option>
@@ -586,7 +570,7 @@ function updateAnalistaUI(){
 // ── Motor escritorio (sin servidor) ──
 const _MV=['por programar','programado','programada','inbound'];
 const _BL=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada','dispositivos subidos','dispositivos cargados','por auditar','finalizado','finalizada','completado','cancelado','cancelado cliente','cancelado operativo','no ejecutado','reprogramado','reagendado','otro'];
-const _FIN=['finalizado','finalizada','completado','dispositivos subidos','dispositivos cargados','por auditar','sin cargar dispositivos','cancelado','cancelado cliente','cancelado operativo','no ejecutado','por reprogramar','reprogramado','reagendado'];
+const _FIN=['finalizado','finalizada','completado','dispositivos subidos','dispositivos cargados','por auditar','cancelado','cancelado cliente','cancelado operativo','no ejecutado'];
 const _IP=['en camino','en sitio','iniciado','iniciada','mac enviada','mac principal enviada'];
 function _ns(x,d=''){return(x!=null&&x!==''&&String(x).toLowerCase()!='null'&&String(x).toLowerCase()!='nan')?String(x).trim():d;}
 function _nsu(x,d='SIN_VALOR'){const s=_ns(x,d);return(!s||s===d)?d:s.toUpperCase();}
@@ -680,9 +664,12 @@ const STATUS_ICON = {
   'finalizado': '✅', 'finalizada': '✅',
 };
 const ALERT_ICON = {
-  'EN_SITIO_PROLONGADO': '⏱️', 'SOBRECARGA_FRANJA': '⚠️',
-  'SOBRECARGA_TOTAL': '🔥', 'SIN_TECNICO': '👤', 'SIN_FRANJA': '📅',
-  'FRANJA_VENCIDA': '⏰',
+  'EN_SITIO_PROLONGADO': '⏱️', 'INICIADO_PROLONGADO': '⏱️',
+  'SOBRECARGA_FRANJA': '⚠️', 'SOBRECARGA_TOTAL': '🔥',
+  'SIN_TECNICO': '👤', 'SIN_FRANJA': '📅',
+  'FRANJA_VENCIDA': '⏰', 'FRANJA_ACTIVA_SIN_MARCACION': '🚨',
+  'RIESGO_INCUMPLIMIENTO_FRANJA': '⚠️', 'ALCANZADO': '🏁',
+  'CARGA_BAJA': '📉',
 };
 
 function esc(s){ return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]) }
@@ -800,73 +787,6 @@ async function uploadExcel(input){
   input.value='';
 }
 
-// ── Multi-zona filter ──
-let _ZONA_FILTER = new Set(); // empty = todas
-
-function _getSelectedZonas(){
-  return _ZONA_FILTER; // Set of uppercase zona strings; empty = show all
-}
-
-function _buildZonaChecklist(zonas){
-  const list = document.getElementById('f-sug-zona-list');
-  if(!list) return;
-  list.innerHTML = zonas.map(z=>`
-    <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:12px">
-      <input type="checkbox" value="${esc(z)}" ${_ZONA_FILTER.size===0||_ZONA_FILTER.has(z.toUpperCase())?'checked':''} onchange="_onZonaCheck()">
-      ${esc(z)}
-    </label>`).join('');
-  _updateZonaLabel();
-}
-
-function _onZonaCheck(){
-  const checks = document.querySelectorAll('#f-sug-zona-list input[type=checkbox]');
-  _ZONA_FILTER = new Set();
-  checks.forEach(c=>{ if(c.checked) _ZONA_FILTER.add(c.value.toUpperCase()); });
-  // If all checked → treat as "all" (empty set = no filter)
-  const total = checks.length;
-  if(_ZONA_FILTER.size === total) _ZONA_FILTER = new Set();
-  _updateZonaLabel();
-  renderSugerencias(); renderIntercambios();
-}
-
-function _updateZonaLabel(){
-  const lbl = document.getElementById('f-sug-zona-label');
-  if(!lbl) return;
-  if(_ZONA_FILTER.size === 0) lbl.textContent = '🗺 Todas las zonas';
-  else if(_ZONA_FILTER.size === 1) lbl.textContent = '🗺 ' + [..._ZONA_FILTER][0];
-  else lbl.textContent = `🗺 ${_ZONA_FILTER.size} zonas`;
-}
-
-function toggleZonaChecklist(){
-  const panel = document.getElementById('f-sug-zona-panel');
-  if(!panel) return;
-  const isOpen = panel.classList.contains('open');
-  // close all other checklists
-  document.querySelectorAll('.tech-checklist.open').forEach(p=>p.classList.remove('open'));
-  if(!isOpen) panel.classList.add('open');
-}
-
-function filterZonaChecklist(input){
-  const q = input.value.toLowerCase();
-  document.querySelectorAll('#f-sug-zona-list label').forEach(lbl=>{
-    lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? '' : 'none';
-  });
-}
-
-function selectAllZonas(){
-  document.querySelectorAll('#f-sug-zona-list input[type=checkbox]').forEach(c=>c.checked=true);
-  _ZONA_FILTER = new Set();
-  _updateZonaLabel();
-  renderSugerencias(); renderIntercambios();
-}
-
-function clearZonas(){
-  document.querySelectorAll('#f-sug-zona-list input[type=checkbox]').forEach(c=>c.checked=false);
-  _ZONA_FILTER = new Set(['__NONE__']); // no match sentinel
-  _updateZonaLabel();
-  renderSugerencias(); renderIntercambios();
-}
-
 // ── Render All ──
 function renderAll(){
   if(!DATA) return;
@@ -927,6 +847,11 @@ function renderResumen(){
       <div class="card-value" style="color:var(--purple)">${r.sugerencias||0}</div>
       <div class="card-sub">Acciones posibles</div>
     </div>
+    <div class="card ${r.tecnicos_t2>0?'blue':''}">
+      <div class="card-label">Turnos</div>
+      <div class="card-val">${r.tecnicos_t1||0}T1 / ${r.tecnicos_t2||0}T2</div>
+      <div class="card-sub">${r.tecnicos_alcanzados>0?'<span style="color:var(--red)">⚠ '+r.tecnicos_alcanzados+' alcanzado(s)</span>':'Todos en turno'}</div>
+    </div>
     <div class="card ${r.tecnicos_sobrecargados>0?'red':''}">
       <div class="card-label">Técnicos</div>
       <div class="card-value">${r.tecnicos_total||0}</div>
@@ -966,71 +891,29 @@ function renderResumen(){
 }
 
 // ── Status pills por técnico ──
-function buildStatusPills(por_estado, tecnico){
+function buildStatusPills(por_estado){
   if(!por_estado||!Object.keys(por_estado).length) return '';
   const MAP = [
-    {keys:['programado','programada','por programar','inbound'],                      cls:'st-prog',     icon:'⬜', label:'Prog.'},
-    {keys:['en camino'],                                                              cls:'st-camino',   icon:'🚗', label:'En camino'},
-    {keys:['en sitio'],                                                               cls:'st-sitio',    icon:'🏠', label:'En sitio'},
-    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'],  cls:'st-inic',     icon:'🔧', label:'Iniciado'},
-    {keys:['por auditar','dispositivos subidos','dispositivos cargados'],              cls:'st-audit',    icon:'🔍', label:'Por auditar'},
-    {keys:['sin cargar dispositivos'],                                                cls:'st-sindev',   icon:'⚠️', label:'Sin dispositivos'},
-    {keys:['finalizado','finalizada','completado'],                                   cls:'st-fin',      icon:'✅', label:'Fin.'},
-    {keys:['cancelado','cancelado cliente','cancelado operativo','no ejecutado'],      cls:'st-cancel',   icon:'❌', label:'Cancelado'},
-    {keys:['por reprogramar','reprogramado','reagendado'],                            cls:'st-reprogram',icon:'🔄', label:'Reprogramado'},
+    {keys:['programado','programada','por programar','inbound'],  cls:'st-prog',   icon:'⬜', label:'Prog.'},
+    {keys:['en camino'],                                          cls:'st-camino', icon:'🚗', label:'Camino'},
+    {keys:['en sitio'],                                           cls:'st-sitio',  icon:'🏠', label:'En sitio'},
+    {keys:['iniciado','iniciada','trabajando','mac enviada','mac principal enviada'], cls:'st-inic', icon:'🔧', label:'Iniciado'},
+    {keys:['por auditar','dispositivos subidos','dispositivos cargados'],            cls:'st-audit', icon:'🔍', label:'Auditar'},
+    {keys:['finalizado','finalizada','completado'],               cls:'st-fin',    icon:'✅', label:'Fin.'},
+    {keys:['cancelado','cancelado cliente','cancelado operativo','no ejecutado'],    cls:'st-cancel', icon:'❌', label:'Cancelado'},
   ];
   const pills = [];
-  let pillIdx = 0;
-  const techKey = (tecnico||'').replace(/[^a-zA-Z0-9]/g,'_');
   MAP.forEach(group=>{
     let cnt=0;
     group.keys.forEach(k=>{ cnt += por_estado[k]||0; });
-    if(cnt>0){
-      const pid=`pill-${techKey}-${pillIdx++}`;
-      const keysJson=JSON.stringify(group.keys); // keep double-quotes: valid inside single-quote attr
-      pills.push(`<span id="${pid}" class="st-pill ${group.cls}" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">${group.icon} ${group.label} <strong>${cnt}</strong></span>`);
-    }
+    if(cnt>0) pills.push(`<span class="st-pill ${group.cls}">${group.icon} ${group.label} <strong>${cnt}</strong></span>`);
   });
   // Estados no mapeados
   const mapped = MAP.flatMap(g=>g.keys);
   Object.entries(por_estado).forEach(([k,v])=>{
-    if(!mapped.includes(k)&&v>0){
-      const pid=`pill-${techKey}-${pillIdx++}`;
-      const keysJson=JSON.stringify([k]);
-      pills.push(`<span id="${pid}" class="st-pill st-fin" data-tech="${esc(tecnico||'')}" data-keys='${keysJson}' onclick="togglePillDetail(this)">• ${esc(k)} <strong>${v}</strong></span>`);
-    }
+    if(!mapped.includes(k)&&v>0) pills.push(`<span class="st-pill st-fin">• ${esc(k)} <strong>${v}</strong></span>`);
   });
   return pills.join('');
-}
-
-function togglePillDetail(pill){
-  const techName = pill.dataset.tech;
-  const keys = JSON.parse(pill.dataset.keys);
-  const pillsDiv = pill.closest('.status-pills');
-  const detailId = 'det-'+pill.id;
-  let det = pillsDiv.parentElement.querySelector('#'+CSS.escape(detailId));
-  if(!det){
-    det = document.createElement('div');
-    det.id = detailId;
-    det.className = 'pill-detail';
-    pillsDiv.parentElement.insertBefore(det, pillsDiv.nextSibling);
-  }
-  if(det.classList.contains('open')){det.classList.remove('open');return;}
-  const allOrds=[...(DATA.ordenes_movibles||[]),...(DATA.ordenes_bloqueadas||[])];
-  const match=allOrds.filter(o=>{
-    if((o.tecnico||'SIN_ASIGNAR').trim()!==techName.trim()) return false;
-    const s=_normSt(o.estado);
-    return keys.some(k=>s.includes(k));
-  });
-  if(!match.length){det.innerHTML='<em style="color:var(--text3)">Sin órdenes</em>';}
-  else{
-    det.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0">'+
-      match.map(o=>`<a href="https://admin.somosinternet.com/appointments/${esc(o.id)}" target="_blank" style="color:var(--blue);font-weight:600;background:rgba(56,139,253,.1);border-radius:4px;padding:2px 6px">#${esc(o.id)}</a>`).join('')+
-    '</div>';
-  }
-  // Close other open details for same card
-  pill.closest('.tech-card').querySelectorAll('.pill-detail.open').forEach(d=>{if(d.id!==detailId)d.classList.remove('open');});
-  det.classList.add('open');
 }
 
 // ── Técnicos ──
@@ -1045,6 +928,9 @@ function renderTecnicos(){
   if(zonaFilt) techs = techs.filter(t=>(t.zona||'').toUpperCase()===zonaFilt);
   if(sFilter==='sobrecarga') techs = techs.filter(t=>t.sobrecarga && t.tecnico!=='SIN_ASIGNAR');
   if(sFilter==='capacidad') techs = techs.filter(t=>!t.sobrecarga);
+  if(sFilter==='alcanzado') techs = techs.filter(t=>(DATA.alertas||[]).some(a=>a.tipo==='ALCANZADO'&&a.tecnico===t.tecnico));
+  if(sFilter==='T1') techs = techs.filter(t=>t.turno==='T1');
+  if(sFilter==='T2') techs = techs.filter(t=>t.turno==='T2');
 
   // Group by zone
   const byZona = {};
@@ -1063,22 +949,26 @@ function renderTecnicos(){
       📍 ${esc(zona)} <span style="font-size:11px;color:var(--text3)">— ${zonaTechs.length} técnicos · ${totalZ} órdenes${sobZ?` · <span style="color:var(--red)">${sobZ} sobrecargados</span>`:''}</span>
     </div>`;
     zonaTechs.forEach(t=>{
+    const alcanzadoAlert = (DATA.alertas||[]).find(a=>a.tipo==='ALCANZADO'&&a.tecnico===t.tecnico);
+    t.alcanzado = !!alcanzadoAlert;
     const max=6; const pct=Math.min(100,Math.round((t.total/max)*100));
     const color = t.sobrecarga?'fill-red': pct>60?'fill-yellow':'fill-green';
     const franjas = Object.entries(t.franjas||{}).map(([f,c])=>`<span class="franja-pill ${c>=2?'dup':''}">${esc(f)} ×${c}</span>`).join('');
-    const statusPills = buildStatusPills(t.por_estado||{}, t.tecnico);
+    const statusPills = buildStatusPills(t.por_estado||{});
     html += `
-      <div class="tech-card ${t.sobrecarga?'sobrecarga':''}">
+      <div class="tech-card ${t.sobrecarga?'sobrecarga':''} ${t.alcanzado?'alcanzado':''}">
         <div class="tech-name">
           ${t.sobrecarga?'<span class="overload-dot"></span>':''}
           ${esc(t.tecnico)}
+          <span style="margin-left:auto;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;background:${t.turno==='T2'?'#e8f0fe':'#e6f4ea'};color:${t.turno==='T2'?'var(--blue)':'var(--green)'};">${t.turno||'T1'}</span>
+          ${t.alcanzado?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--red-bg);color:var(--red);font-weight:700;margin-left:3px">🏁 ALCANZADO</span>':''}
         </div>
-        <div class="tech-zone">📍 ${esc(t.zona==='SIN_ZONA'?(t.ciudad||t.zona):t.zona)}</div>
+        <div class="tech-zone">📍 ${esc(t.zona==='SIN_ZONA'?(t.ciudad||t.zona):t.zona)} ${t.shift_end?'· '+esc(t.shift_end):''}h</div>
         <div class="progress-bar"><div class="progress-fill ${color}" style="width:${pct}%"></div></div>
         <div class="tech-stats">
           <div class="tech-stat"><span class="val">${t.total}</span><span class="lbl">Total</span></div>
           <div class="tech-stat"><span class="val" style="color:var(--green)">${t.movibles}</span><span class="lbl">Prog.</span></div>
-          <div class="tech-stat"><span class="val" style="color:${t.activas>0?'var(--orange)':('var(--text3)')}">${t.activas}</span><span class="lbl">En ejec.</span></div>
+          <div class="tech-stat"><span class="val" style="color:var(--yellow)">${t.activas}</span><span class="lbl">En ruta</span></div>
           <div class="tech-stat"><span class="val" style="color:var(--text3)">${t.finalizadas}</span><span class="lbl">Fin.</span></div>
         </div>
         <div class="status-pills">${statusPills}</div>
@@ -1221,12 +1111,12 @@ function renderSugerencias(){
   let sugs = DATA.sugerencias||[];
   if(TECH_FILTER.size) sugs=sugs.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
   const estadoFilt = document.getElementById('f-sug-estado').value;
-  const zonaFilt = _getSelectedZonas();
+  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
   const riesgoFilt = document.getElementById('f-sug-riesgo').value;
 
   sugs = sugs.map(s=>({...s, sessionStatus: SESSION.applied[s.orden]?'aplicada': SESSION.dismissed[s.orden]?'descartada':'pendiente'}));
   if(estadoFilt!=='todas') sugs=sugs.filter(s=>s.sessionStatus===estadoFilt);
-  if(zonaFilt.size) sugs=sugs.filter(s=>zonaFilt.has((s.zona||'').toUpperCase()));
+  if(zonaFilt) sugs=sugs.filter(s=>(s.zona||'').toUpperCase()===zonaFilt);
   if(riesgoFilt) sugs=sugs.filter(s=>s.riesgo===riesgoFilt);
   // Filtro de exclusión local (no afecta el backend)
   if(EXCLUIDOS_SUGS.size) sugs=sugs.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
@@ -1267,7 +1157,7 @@ function renderSugerencias(){
           <span style="color:var(--blue);font-weight:700">→</span>
           <span class="sug-tech-to" title="${esc(techTo)}">${esc(techTo)}</span>
         </div>
-        <div class="sug-mini-franja">⏰ ${esc(s.franja_actual)}${s.franja_sugerida&&s.franja_sugerida!==s.franja_actual?' → <strong>'+esc(s.franja_sugerida)+'</strong>':''}</div>
+        <div class="sug-mini-franja">⏰ ${esc(s.franja_actual)}${s.franja_sugerida&&s.franja_sugerida!==s.franja_actual?' → <strong>'+esc(s.franja_sugerida)+'</strong>':''} ${s.dist_receptor_km!=null?'· 📍 <strong style="color:'+( s.dist_receptor_km<1?'var(--green)':s.dist_receptor_km<2.5?'var(--yellow)':'var(--red)')+'">'+s.dist_receptor_km.toFixed(1)+'km</strong>':''}</div>
         <div class="sug-mini-riesgo">${riskBadge(s.riesgo)} ${esc((s.beneficio||'').substring(0,55))}${(s.beneficio||'').length>55?'…':''}</div>
         <div class="sug-mini-motivo" title="${esc(s.motivo)}">💬 ${esc((s.motivo||'').substring(0,80))}${(s.motivo||'').length>80?'…':''}</div>
         <div class="sug-mini-actions">
@@ -1286,12 +1176,12 @@ function renderSugerencias(){
 function renderIntercambios(){
   if(!DATA) return;
   const intercambios = DATA.intercambios||[];
-  const zonaFilt = _getSelectedZonas();
+  const zonaFilt = (document.getElementById('f-sug-zona').value||'').toUpperCase();
   const estadoFilt = document.getElementById('f-sug-estado').value;
 
   let list_data = intercambios;
   if(TECH_FILTER.size) list_data=list_data.filter(s=>TECH_FILTER.has(s.tecnico_actual||'')||TECH_FILTER.has(s.tecnico_sugerido||''));
-  if(zonaFilt.size) list_data = list_data.filter(s=>zonaFilt.has((s.zona||'').toUpperCase()) || zonaFilt.has((s.zona_b||'').toUpperCase()));
+  if(zonaFilt) list_data = list_data.filter(s=>(s.zona||'').toUpperCase()===zonaFilt || (s.zona_b||'').toUpperCase()===zonaFilt);
   if(EXCLUIDOS_SUGS.size) list_data = list_data.filter(s=>!EXCLUIDOS_SUGS.has(s.tecnico_actual||'') && !EXCLUIDOS_SUGS.has(s.tecnico_sugerido||''));
   if(estadoFilt==='aplicada') list_data = list_data.filter(s=>SESSION.applied['INT_'+s.orden+'_'+s.orden_b]);
   else if(estadoFilt==='descartada') list_data = list_data.filter(s=>SESSION.dismissed['INT_'+s.orden+'_'+s.orden_b]);
@@ -1509,7 +1399,7 @@ function populateFilters(){
   };
   const zonas = [...new Set((DATA.carga_por_tecnico||[]).map(t=>t.zona).filter(z=>z&&z!=='SIN_ZONA'))].sort();
   fillSelect('filter-tech-zona', zonas);
-  _buildZonaChecklist(zonas);
+  fillSelect('f-sug-zona',       zonas);
   // Poblar dropdown de exclusión con todos los técnicos
   const excSel = document.getElementById('f-sug-excluir-select');
   if(excSel){

@@ -10,11 +10,17 @@ from datetime import datetime, timedelta
 from config import (
     MAX_IDEAL_LOAD, MIN_IDEAL_LOAD, MAX_ABSOLUTE_LOAD, MAX_ORDERS_PER_SLOT,
     MAX_DUPLICATED_SLOTS, MIN_IMBALANCE_TO_MOVE, ORDER_DURATION_HOURS,
-    MAX_ORDER_DURATION_HOURS, MAX_ALLOWED_DISTANCE_KM, FRAGMENTATION_PENALTY,
-    INTERZONE_DISTANCE_PENALTY, ZONE_ONLY_NO_COORDS_PENALTY,
+    MAX_ORDER_DURATION_HOURS, MAX_ALLOWED_DISTANCE_KM, MAX_DIST_EXCEPTION_KM,
+    FRAGMENTATION_PENALTY, INTERZONE_DISTANCE_PENALTY, ZONE_ONLY_NO_COORDS_PENALTY,
     MAX_INTERZONE_ASSIGNMENTS_PER_TECH, ZONE_ADJACENCY, MOVABLE_STATUSES,
-    ONSITE_ALERT_MINUTES, INICIADO_ALERT_MINUTES, OVERLOAD_PER_SLOT, EFFICIENT_TECH_PROTECTION_SCORE,
+    ONSITE_ALERT_MINUTES, INICIADO_ALERT_MINUTES, OVERLOAD_PER_SLOT,
+    EFFICIENT_TECH_PROTECTION_SCORE,
     ACTIVE_SLOT_NO_PROGRESS_MINUTES, SLOT_RISK_MINUTES_BEFORE_END, now_bogota,
+    T1_END_HOUR, T2_END_HOUR, T1_FRANJAS, T2_FRANJAS,
+    LUNCH_START_T1, LUNCH_END_T1, LUNCH_START_T2, LUNCH_END_T2,
+    ALCANZADO_BUFFER_HOURS, T2_MAX_ORDERS_10H_SLOT,
+    GEO_BONUS_0_5KM, GEO_BONUS_1KM, GEO_BONUS_2KM, GEO_PENALTY_OVER,
+    FRANJA_DUP_PENALTY,
 )
 from services.normalization import (
     normalize_order, haversine, get_centroid, is_same_unit, order_has_coords,
@@ -22,7 +28,6 @@ from services.normalization import (
     status_completion_credit, norm_zone, is_movable, is_blocked,
     norm_status, detect_turno,
 )
-from config import T1_END_HOUR, T2_END_HOUR, T1_FRANJAS, T2_FRANJAS, ALCANZADO_BUFFER_HOURS
 
 logger = logging.getLogger(__name__)
 
@@ -205,18 +210,29 @@ def _is_tech_efficient(tech: str, tech_orders: dict, tech_franja: dict,
 
 def _can_add_to_franja(tech: str, franja: str, tech_franja: dict,
                         tech_orders: dict, current_hour: float,
-                        same_unit: bool = False, turno: str = "T1") -> tuple:
+                        same_unit: bool = False,
+                        turno: str = None) -> tuple:
     franja_start, franja_end = parse_franja_hours(franja)
     current_in_slot = tech_franja.get(tech, {}).get(franja, 0)
 
-    # ── Regla de turno: T1 no puede atender franjas 16:00+ (termina 15:30) ──
+    # ── Validaciones de turno ──────────────────────────────────────────
+    if turno is None:
+        turno = detect_turno(tech, tech_orders.get(tech, []))
+
+    # T1 no puede recibir franjas 16:00+
     if franja_start is not None and franja_start >= 16.0 and turno == "T1":
         return False, "Técnico T1 no disponible en franja 16:00+ (turno hasta 15:30)"
-    # T2 no puede atender franja 08:00-09:30 (empieza a las 10:00)
+
+    # T2 no puede recibir franja 08:00-09:30
     if franja_start is not None and franja_start < 9.5 and turno == "T2":
         return False, "Técnico T2 no disponible en franja 08:00 (turno desde 10:00)"
 
+    # T2: máximo 1 orden en franja 10:00-11:30 (almuerza a las 11:30)
+    if (franja_start is not None and 9.9 <= franja_start <= 10.1
+            and turno == "T2" and current_in_slot >= T2_MAX_ORDERS_10H_SLOT):
+        return False, "T2 ya tiene 1 orden en 10:00-11:30 (almuerza 11:30)"
 
+    # ── Límites generales de slot ───────────────────────────────────────
     if current_in_slot >= MAX_ORDERS_PER_SLOT:
         return False, "Ya tiene 2 órdenes en esta franja"
 
@@ -306,10 +322,15 @@ def _build_indexes(orders: list) -> dict:
         for t, o_list in tech_orders.items()
     }
 
-    # Detectar turno de cada técnico (T1 / T2)
+    # Turno por técnico (CSV primero, fallback auto-detección)
     tech_turno = {
-        tech: detect_turno(tech, orders_list)
-        for tech, orders_list in tech_orders.items()
+        t: detect_turno(t, o_list)
+        for t, o_list in tech_orders.items()
+    }
+    # Fin de turno por técnico
+    tech_shift_end = {
+        t: (T2_END_HOUR if tech_turno.get(t) == "T2" else T1_END_HOUR)
+        for t in tech_orders
     }
 
     return {
@@ -324,7 +345,8 @@ def _build_indexes(orders: list) -> dict:
         "tech_pending":        tech_pending,
         "tech_eff_load":       tech_eff_load,
         "tech_credit":         tech_credit,
-        "tech_turno":          tech_turno,   # "T1" o "T2" por técnico
+        "tech_turno":          tech_turno,
+        "tech_shift_end":      tech_shift_end,
     }
 
 
@@ -615,51 +637,58 @@ def _generate_alerts(orders: list, idx: dict, now_dt) -> list:
                 ),
             })
 
-
-    # ── 7. Alerta ALCANZADO: técnico con más trabajo del que puede completar en su turno ──
-    tech_turno = idx.get("tech_turno", {})
-    TIPO_PESO_ALERTA = {"instalacion":2.0,"instalación":2.0,"soporte":1.5,"reubicacion":1.5,
-                         "reubicación":1.5,"desinstalacion":1.5,"desinstalación":1.5,
-                         "upgrade":1.0,"adicion":1.0,"adición":1.0,"traslado":1.5}
-    LUNCH_START, LUNCH_END = 12.0, 13.0
-    for tech, orders_list in tech_orders.items():
+    # 8. Alerta ALCANZADO: técnico con más horas de trabajo pendiente que horas disponibles
+    # Fórmula: horas_necesarias = órdenes_pendientes × ORDER_DURATION_HOURS
+    #          horas_restantes  = shift_end − now_hour − lunch_si_aún_no_pasó
+    # Si horas_necesarias > horas_restantes + ALCANZADO_BUFFER_HOURS → ALCANZADO
+    tech_shift_end = idx.get("tech_shift_end", {})
+    tech_turno_map = idx.get("tech_turno", {})
+    for tech, t_orders in tech_orders.items():
         if tech == "SIN_ASIGNAR":
             continue
-        turno = tech_turno.get(tech, "T1")
-        shift_end = T2_END_HOUR if turno == "T2" else T1_END_HOUR
-        # Horas útiles restantes (descontar almuerzo si aún no pasó)
+        turno_t = tech_turno_map.get(tech, "T1")
+        shift_end = tech_shift_end.get(tech, T1_END_HOUR)
+        lunch_start = LUNCH_START_T2 if turno_t == "T2" else LUNCH_START_T1
+        lunch_end   = LUNCH_END_T2   if turno_t == "T2" else LUNCH_END_T1
+
+        # Horas restantes de turno (descontando almuerzo si aún no empezó)
         remaining = max(0.0, shift_end - now_hour)
-        if now_hour < LUNCH_START < shift_end:
-            remaining -= min(LUNCH_END, shift_end) - LUNCH_START
-        remaining = max(0.0, remaining)
-        # Órdenes pendientes reales (no finalizadas ni canceladas)
-        pending_os = [
-            o for o in orders_list
-            if o.get("progress", 0) < 6 and "cancel" not in o.get("estado","").lower()
-        ]
-        if not pending_os:
-            continue
-        time_needed = sum(
-            TIPO_PESO_ALERTA.get(o.get("tipo","").lower(), 1.5)
-            for o in pending_os
+        if now_hour < lunch_start < shift_end:
+            lunch_overlap = min(lunch_end, shift_end) - lunch_start
+            remaining -= max(0.0, lunch_overlap)
+
+        # Órdenes pendientes que aún necesitan tiempo
+        pending_hrs = sum(
+            ORDER_DURATION_HOURS
+            for o in t_orders
+            if o.get("movible") and o.get("franja", "Sin Franja") != "Sin Franja"
         )
-        exceso = time_needed - (remaining - ALCANZADO_BUFFER_HOURS)
-        if exceso > 0.5:  # al menos 30 min de exceso para alertar
+        # Añadir tiempo estimado de órdenes activas (en camino / iniciado)
+        active_hrs = sum(
+            _estimate_remaining_hours(o, now_hour)
+            for o in t_orders
+            if 1 <= o.get("progress", 0) < 6
+        )
+        total_needed = pending_hrs + active_hrs
+
+        exceso = total_needed - remaining
+        if exceso > ALCANZADO_BUFFER_HOURS:
+            sev = "critica" if exceso >= 2.0 else "alta"
             alerts.append({
-                "tipo":               "ALCANZADO",
-                "severidad":          "critica" if exceso >= 2.0 else "alta",
-                "tecnico":            tech,
-                "turno":              turno,
-                "horas_necesarias":   round(time_needed, 1),
-                "horas_disponibles":  round(max(0.0, remaining), 1),
-                "exceso_horas":       round(exceso, 1),
-                "ordenes_pendientes": len(pending_os),
-                "detalle":            (
-                    f"{tech} ({turno}) necesita ~{time_needed:.1f}h pero quedan "
-                    f"{remaining:.1f}h de turno — exceso {exceso:.1f}h con "
-                    f"{len(pending_os)} órdenes pendientes"
+                "tipo":             "ALCANZADO",
+                "severidad":        sev,
+                "tecnico":          tech,
+                "turno":            turno_t,
+                "horas_necesarias": round(total_needed, 1),
+                "horas_restantes":  round(remaining, 1),
+                "exceso_horas":     round(exceso, 1),
+                "ordenes_pendientes": int(pending_hrs / ORDER_DURATION_HOURS),
+                "shift_end":        f"{int(shift_end):02d}:{int((shift_end % 1)*60):02d}",
+                "detalle": (
+                    f"{tech} ({turno_t}): necesita ~{total_needed:.1f}h pero solo quedan "
+                    f"{remaining:.1f}h de turno. Exceso: {exceso:.1f}h. "
+                    f"Reasignar {max(1, int(exceso / ORDER_DURATION_HOURS))} orden(es) urgente."
                 ),
-                "franja": "",
             })
 
     return alerts
@@ -720,33 +749,48 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
         if donor_total > MAX_IDEAL_LOAD:
             score += (donor_total - MAX_IDEAL_LOAD) * 500
 
-    # ─── Verificar capacidad de franja ───
-    # Regla 1: NO sugerir si el receptor ya tiene 1 orden en esa franja.
-    #   Motivo: crear un duplicado vía sugerencia no mejora productividad ni
-    #   desplazamiento — solo genera riesgo en ambas órdenes del slot.
-    #   El schedule original puede tener duplicados si el coordinador los planeó,
-    #   pero el motor NO los crea de nuevo via sugerencias.
-    current_in_franja = tech_franja.get(receiver, {}).get(order["franja"], 0)
-    if current_in_franja >= 1:
-        return -9999.0  # Franja ya ocupada — bloqueo por política operativa
+    # ─── Verificar turno del receptor ───
+    recv_turno = idx.get("tech_turno", {}).get(receiver, None)
+    if recv_turno is None:
+        recv_turno = detect_turno(receiver, tech_orders.get(receiver, []))
+    order_franja_start, _ = parse_franja_hours(order.get("franja", ""))
+    order_franja_start = order_franja_start or 0.0
 
-    # Regla 2: La franja 14:30 NUNCA se duplica.
-    #   Es el último bloque del día. Dos instalaciones en 1.5h al cierre
-    #   garantizan incumplimiento de al menos una. Se protege siempre.
-    franja_start_check, _ = parse_franja_hours(order["franja"])
-    if franja_start_check is not None and franja_start_check >= 14.5:
+    # T1 no puede recibir 16:00+; T2 no puede recibir 08:00
+    if order_franja_start >= 16.0 and recv_turno == "T1":
+        return -9999.0
+    if order_franja_start < 9.5 and recv_turno == "T2":
+        return -9999.0
+
+    # ─── Verificar capacidad de franja ───
+    current_in_franja = tech_franja.get(receiver, {}).get(order["franja"], 0)
+
+    # Regla: La franja 14:30-16:00 NUNCA se duplica — último slot del día T1.
+    franja_start_check = order_franja_start
+    if franja_start_check >= 14.5 and franja_start_check < 16.0:
         tarde_recv = sum(
             c for f, c in tech_franja.get(receiver, {}).items()
             if (parse_franja_hours(f)[0] or 0) >= 14.5
         )
         if tarde_recv >= 1:
-            return -9999.0  # Franja tarde ya tiene orden — no duplicar nunca
+            return -9999.0  # Franja tarde ya tiene orden — no duplicar
+
+    # T2 slot 10:00: máximo 1 orden (almuerza 11:30)
+    if 9.9 <= franja_start_check <= 10.1 and recv_turno == "T2":
+        if current_in_franja >= T2_MAX_ORDERS_10H_SLOT:
+            return -9999.0
 
     can_add, _ = _can_add_to_franja(receiver, order["franja"], tech_franja,
-                                     tech_orders, current_hour)
+                                     tech_orders, current_hour, turno=recv_turno)
     if not can_add:
         return -9999.0
-    score += 300
+
+    # Penalización (no bloqueo) si el receptor ya tiene algo en esa franja
+    # El coordinador puede aceptar un dup si tiene sentido operativo
+    if current_in_franja >= 1:
+        score -= FRANJA_DUP_PENALTY
+    else:
+        score += 300
 
     # ─── Distancia desde la orden ACTIVA del receptor (En sitio / Iniciado) ───
     # La referencia correcta NO es el centroide sino donde está el técnico AHORA.
@@ -779,14 +823,16 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
     # Cuanto más cerca esté la orden de donde el técnico está trabajando AHORA,
     # más productivo es el movimiento (mínimo desplazamiento al terminar la actual).
     if dist_recv is not None:
-        if dist_recv < 1.0:
-            score += 1200  # < 1km: misma cuadra — movimiento óptimo
+        if dist_recv > MAX_ALLOWED_DISTANCE_KM:
+            score -= GEO_PENALTY_OVER   # > 2.5km: penalización fuerte (era 8km)
+        elif dist_recv < 0.5:
+            score += GEO_BONUS_0_5KM    # < 0.5km: misma cuadra — óptimo
+        elif dist_recv < 1.0:
+            score += GEO_BONUS_1KM      # < 1km: muy cercano
         elif dist_recv < 2.0:
-            score += 900   # < 2km: muy cercano — alta productividad
-        elif dist_recv < 5.0:
-            score += 500   # < 5km: aceptable
-        elif dist_recv < 10.0:
-            score += 150   # < 10km: desvío leve
+            score += GEO_BONUS_2KM      # < 2km: aceptable
+        elif dist_recv < MAX_DIST_EXCEPTION_KM:
+            score += 150                # 2-4km: excepción justificada
 
     # ─── Bonus/penalización por zona ───
     recv_zone_main = idx["tech_main_zone"].get(receiver, "SIN_ZONA")
@@ -870,6 +916,9 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
         best_receiver = None
         best_risk = "bajo"
 
+        order_franja_start, _ = parse_franja_hours(order.get("franja", ""))
+        order_franja_start = order_franja_start or 0.0
+
         for receiver in techs:
             if receiver == donor:
                 continue
@@ -878,13 +927,19 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
             if sugs_por_receptor.get(receiver, 0) >= MAX_SUGS_RECEPTOR:
                 continue  # Ya acumuló suficientes sugerencias individuales
 
-            # ── Compatibilidad de turno con franja de la orden ──
-            order_franja_start = parse_franja_hours(order.get("franja",""))[0] or 0
-            recv_turno = idx.get("tech_turno",{}).get(receiver,"T1")
-            if recv_turno == "T1" and order_franja_start >= 16.0:
-                continue  # T1 no puede atender 16:00+ (turno hasta 15:30)
-            if recv_turno == "T2" and order_franja_start < 9.5:
-                continue  # T2 no disponible en franja 08:00 (empieza 10:00)
+            # Filtro turno: T1 no recibe 16:00+, T2 no recibe 08:00
+            recv_turno = idx.get("tech_turno", {}).get(receiver)
+            if recv_turno is None:
+                recv_turno = detect_turno(receiver, tech_orders.get(receiver, []))
+            if order_franja_start >= 16.0 and recv_turno == "T1":
+                continue
+            if order_franja_start < 9.5 and recv_turno == "T2":
+                continue
+
+            # Cap geográfico: descartar receptores demasiado lejos (ahorro de cómputo)
+            dist_quick = _dist_to_tech(order, receiver, tech_orders, tech_locs)
+            if dist_quick is not None and dist_quick > MAX_DIST_EXCEPTION_KM * 1.5:
+                continue  # Más de 6km: no vale la pena calcular score completo
 
             score = _score_suggestion(order, donor, receiver, idx, current_hour)
             if score > best_score:
@@ -1319,11 +1374,39 @@ def _generate_swap_suggestions(orders: list, idx: dict) -> list:
                     if has_coords:
                         dist_saving = (dist_xa + dist_yb) - (dist_xb + dist_ya)
 
-                    # Verificar que el intercambio también respeta la franja
-                    # (misma franja garantiza que no se adelanta ni atrasa ninguna orden)
-                    franja_ok = order_x["franja"] == order_y["franja"]
-                    if not franja_ok:
-                        continue  # No intercambiar entre franjas distintas
+                    # Verificar compatibilidad de franja para el intercambio
+                    franja_x = order_x["franja"]
+                    franja_y = order_y["franja"]
+                    franja_same = franja_x == franja_y
+
+                    if not franja_same:
+                        # Intercambio cross-franja: solo si ambos técnicos son compatibles
+                        # con la franja del otro (respeto de turno)
+                        tech_turno_map = idx.get("tech_turno", {})
+                        turno_a = tech_turno_map.get(tech_a, detect_turno(tech_a, tech_orders.get(tech_a, [])))
+                        turno_b = tech_turno_map.get(tech_b, detect_turno(tech_b, tech_orders.get(tech_b, [])))
+                        fx_start, _ = parse_franja_hours(franja_x)
+                        fy_start, _ = parse_franja_hours(franja_y)
+                        fx_start = fx_start or 0.0
+                        fy_start = fy_start or 0.0
+                        # tech_b recibe order_x (franja_x) — valid?
+                        if fx_start >= 16.0 and turno_b == "T1":
+                            continue
+                        if fx_start < 9.5 and turno_b == "T2":
+                            continue
+                        if 9.9 <= fx_start <= 10.1 and turno_b == "T2":
+                            cur = idx["tech_franja"].get(tech_b, {}).get(franja_x, 0)
+                            if cur >= T2_MAX_ORDERS_10H_SLOT:
+                                continue
+                        # tech_a recibe order_y (franja_y) — valid?
+                        if fy_start >= 16.0 and turno_a == "T1":
+                            continue
+                        if fy_start < 9.5 and turno_a == "T2":
+                            continue
+                        if 9.9 <= fy_start <= 10.1 and turno_a == "T2":
+                            cur = idx["tech_franja"].get(tech_a, {}).get(franja_y, 0)
+                            if cur >= T2_MAX_ORDERS_10H_SLOT:
+                                continue
 
                     score = zone_delta * 900 + subz_delta * 300 + dist_saving * 250
                     if score <= 50:
@@ -1438,11 +1521,13 @@ def run_leveling(raw_orders: list) -> dict:
                 _c = _o.get("ciudad", "") or ""
                 if _c and _c.upper() not in ("SIN_ZONA", ""):
                     zona_display = _c.upper(); break
-        turno_t = idx.get("tech_turno",{}).get(tech,"T1")
+        turno_t = idx.get("tech_turno", {}).get(tech, "T1")
+        shift_end_t = idx.get("tech_shift_end", {}).get(tech, T1_END_HOUR)
         carga_por_tecnico.append({
             "tecnico":    tech,
-            "turno":      turno_t,
             "zona":       zona_display,
+            "turno":      turno_t,
+            "shift_end":  f"{int(shift_end_t):02d}:{int((shift_end_t % 1)*60):02d}",
             "total":      total,
             "movibles":   movibles_t,
             "bloqueadas": bloq_t,
@@ -1507,6 +1592,9 @@ def run_leveling(raw_orders: list) -> dict:
     techs_sobrecargados = sum(1 for c in carga_por_tecnico if c["sobrecarga"] and c["tecnico"] != "SIN_ASIGNAR")
     techs_con_capacidad = sum(1 for t, total in idx["tech_total"].items() if t != "SIN_ASIGNAR" and total < MAX_IDEAL_LOAD)
     techs_deficitarios  = sum(1 for t, total in idx["tech_total"].items() if t != "SIN_ASIGNAR" and total < MIN_IDEAL_LOAD)
+    techs_t1            = sum(1 for c in carga_por_tecnico if c.get("turno") == "T1" and c["tecnico"] != "SIN_ASIGNAR")
+    techs_t2            = sum(1 for c in carga_por_tecnico if c.get("turno") == "T2" and c["tecnico"] != "SIN_ASIGNAR")
+    techs_alcanzados    = sum(1 for a in alerts if a.get("tipo") == "ALCANZADO")
     # Técnicos sin marcar en franja activa (para resumen ejecutivo)
     techs_sin_marcacion = len(set(
         a["tecnico"] for a in alerts
@@ -1534,6 +1622,9 @@ def run_leveling(raw_orders: list) -> dict:
             "tecnicos_sobrecargados": techs_sobrecargados,
             "tecnicos_con_capacidad": techs_con_capacidad,
             "tecnicos_deficitarios":  techs_deficitarios,
+            "tecnicos_t1":            techs_t1,
+            "tecnicos_t2":            techs_t2,
+            "tecnicos_alcanzados":    techs_alcanzados,
             "sin_tecnico":            sum(1 for o in movibles if o["tecnico"] == "SIN_ASIGNAR"),
             "sin_franja":             sum(1 for o in movibles if o["franja"] == "Sin Franja"),
             "sin_franja":             sum(1 for o in movibles if o["franja"] == "Sin Franja"),

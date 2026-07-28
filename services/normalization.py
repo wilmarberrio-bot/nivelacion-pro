@@ -21,9 +21,6 @@ def norm_franja(x):
     clean=s.replace(" ","")
     for f in FRANJAS:
         if f.replace(" ","")==clean: return f
-    # Mapear variantes comunes de franja T2
-    T2_MAP = {"16:00-17:30":"16:00-17:30","16:00-18:00":"16:00-17:30","16:00-17:00":"16:00-17:30"}
-    if clean in T2_MAP: return T2_MAP[clean]
     return s
 def parse_franja_hours(franja_str):
     if not franja_str or franja_str=="Sin Franja": return None,None
@@ -114,23 +111,83 @@ def normalize_order(order):
     o["movible"]=o["estado_clase"]=="movible"
     return o
 
+# ── Turno detection ──────────────────────────────────────────────────────────
+import csv, os
+
+_TURNOS_CACHE: dict = {}
+_TURNOS_LOADED: bool = False
+
+def _load_turnos_csv() -> dict:
+    """Carga data/turnos.csv una sola vez. Retorna {tecnico_upper: 'T1'|'T2'}."""
+    global _TURNOS_CACHE, _TURNOS_LOADED
+    if _TURNOS_LOADED:
+        return _TURNOS_CACHE
+    try:
+        from config import TURNOS_CSV_PATH
+        csv_path = TURNOS_CSV_PATH
+    except ImportError:
+        csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "turnos.csv")
+    result = {}
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(row for row in fh if not row.strip().startswith("#"))
+            for row in reader:
+                tech = row.get("tecnico", "").strip().upper()
+                turno = row.get("turno", "").strip().upper()
+                if tech and turno in ("T1", "T2"):
+                    result[tech] = turno
+    except Exception:
+        pass
+    _TURNOS_CACHE = result
+    _TURNOS_LOADED = True
+    return result
+
+def reload_turnos_csv() -> dict:
+    """Fuerza recarga del CSV (útil en desarrollo / tests)."""
+    global _TURNOS_LOADED
+    _TURNOS_LOADED = False
+    return _load_turnos_csv()
 
 def detect_turno(tech: str, tech_orders_list: list) -> str:
     """
-    Detecta si un técnico es T1 o T2 según sus franjas asignadas.
-    - T1: tiene alguna orden 08:00-09:30 → comienza a las 7:30, termina 15:30
-    - T2: todas sus órdenes son 10:00+ → comienza a las 10:00, termina 18:00
-    Se detecta automáticamente sin necesidad de un campo externo.
+    Determina el turno de un técnico.
+    Prioridad:
+      1. Lista maestra data/turnos.csv
+      2. Auto-detección desde franjas de sus órdenes:
+         - T1 si tiene ≥1 orden en 08:00-09:30
+         - T2 si tiene ≥1 orden en 16:00-17:30
+         - T2 si TODAS sus órdenes son ≥ 10:00
+         - T1 por defecto
+    Nota: si un técnico tiene órdenes de 08:00 Y de 16:00 (caso muy raro),
+    se prioriza T1 — no debería ocurrir operativamente.
     """
+    # 1. Lookup en CSV
+    roster = _load_turnos_csv()
+    tech_key = (tech or "").strip().upper()
+    if tech_key in roster:
+        return roster[tech_key]
+    # Búsqueda parcial (por si el nombre en Metabase es más largo)
+    for key, turno in roster.items():
+        if key and (key in tech_key or tech_key in key):
+            return turno
+
+    # 2. Auto-detección desde órdenes
     if not tech_orders_list:
         return "T1"
-    franjas = [o.get("franja", "") for o in tech_orders_list if o.get("franja") and o.get("franja") != "Sin Franja"]
+    franjas = [
+        o.get("franja", "")
+        for o in tech_orders_list
+        if o.get("franja") and o.get("franja") != "Sin Franja"
+    ]
     if not franjas:
         return "T1"
-    # T1: si tiene al menos una orden madrugadora (08:00-09:30)
+    # Regla explícita: orden en 08:00 → T1
     if any("08:00" in f for f in franjas):
         return "T1"
-    # T2: todas las órdenes arrancan a las 10:00 o más tarde
+    # Regla explícita: orden en 16:00 → T2
+    if any("16:00" in f for f in franjas):
+        return "T2"
+    # Si todas las órdenes empiezan a las 10:00 o más tarde → T2
     starts = []
     for f in franjas:
         h, _ = parse_franja_hours(f)

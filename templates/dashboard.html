@@ -649,7 +649,89 @@ async function processExcelDesktop(file){
 
 // ── Estado global ──
 let DATA = null;
-let SESSION = { applied: {}, dismissed: {} };
+let SESSION = { applied: {}, dismissed: {}, patches: {} };
+
+// ── Patch en memoria: mover órdenes entre técnicos al aplicar sugerencias ──
+const _MAX_IDEAL = 5; // MAX_IDEAL_LOAD de config.py
+
+function _recalcTechCard(techName) {
+  const tech = (DATA.carga_por_tecnico||[]).find(t=>t.tecnico===techName);
+  if(!tech) return;
+  const allOrds = [...(DATA.ordenes_movibles||[]), ...(DATA.ordenes_bloqueadas||[])];
+  const ords = allOrds.filter(o=>o.tecnico===techName);
+  tech.total      = ords.length;
+  tech.movibles   = ords.filter(o=>o.movible).length;
+  tech.bloqueadas = tech.total - tech.movibles;
+  tech.activas    = ords.filter(o=>o.progress>=1&&o.progress<6).length;
+  tech.finalizadas= ords.filter(o=>o.progress>=6).length;
+  tech.sobrecarga = tech.total > _MAX_IDEAL;
+  const franjas={}, porEstado={};
+  ords.forEach(o=>{
+    if(o.franja) franjas[o.franja]=(franjas[o.franja]||0)+1;
+    const e=(o.estado||'').toLowerCase();
+    porEstado[e]=(porEstado[e]||0)+1;
+  });
+  tech.franjas   = franjas;
+  tech.por_estado= porEstado;
+}
+
+function _patchApplySugerencia(orden) {
+  const sug = (DATA.sugerencias||[]).find(s=>String(s.orden)===String(orden));
+  if(!sug) return;
+  const allOrds = [...(DATA.ordenes_movibles||[]), ...(DATA.ordenes_bloqueadas||[])];
+  const order = allOrds.find(o=>String(o.id)===String(orden));
+  if(!order) return;
+  SESSION.patches[orden] = {
+    type:'sug', fromTech:sug.tecnico_actual, toTech:sug.tecnico_sugerido,
+    origTecnico:order.tecnico, origFranja:order.franja
+  };
+  order.tecnico = sug.tecnico_sugerido;
+  if(sug.franja_sugerida && sug.franja_sugerida!==sug.franja_actual) order.franja = sug.franja_sugerida;
+  _recalcTechCard(sug.tecnico_actual);
+  _recalcTechCard(sug.tecnico_sugerido);
+}
+
+function _patchRevertSugerencia(orden) {
+  const p = SESSION.patches[orden];
+  if(!p||p.type!=='sug') return;
+  const allOrds = [...(DATA.ordenes_movibles||[]), ...(DATA.ordenes_bloqueadas||[])];
+  const order = allOrds.find(o=>String(o.id)===String(orden));
+  if(order){ order.tecnico=p.origTecnico; order.franja=p.origFranja; }
+  _recalcTechCard(p.fromTech);
+  _recalcTechCard(p.toTech);
+  delete SESSION.patches[orden];
+}
+
+function _patchApplyIntercambio(orden, orden_b) {
+  const ic = (DATA.intercambios||[]).find(i=>String(i.orden)===String(orden)&&String(i.orden_b)===String(orden_b));
+  if(!ic) return;
+  const allOrds = [...(DATA.ordenes_movibles||[]), ...(DATA.ordenes_bloqueadas||[])];
+  const oA = allOrds.find(o=>String(o.id)===String(orden));
+  const oB = allOrds.find(o=>String(o.id)===String(orden_b));
+  const key = 'INT_'+orden+'_'+orden_b;
+  SESSION.patches[key] = {
+    type:'int', techA:ic.tecnico_actual, techB:ic.tecnico_sugerido,
+    origA:oA?.tecnico, origB:oB?.tecnico
+  };
+  if(oA) oA.tecnico = ic.tecnico_sugerido;
+  if(oB) oB.tecnico = ic.tecnico_actual;
+  _recalcTechCard(ic.tecnico_actual);
+  _recalcTechCard(ic.tecnico_sugerido);
+}
+
+function _patchRevertIntercambio(orden, orden_b) {
+  const key = 'INT_'+orden+'_'+orden_b;
+  const p = SESSION.patches[key];
+  if(!p||p.type!=='int') return;
+  const allOrds = [...(DATA.ordenes_movibles||[]), ...(DATA.ordenes_bloqueadas||[])];
+  const oA = allOrds.find(o=>String(o.id)===String(orden));
+  const oB = allOrds.find(o=>String(o.id)===String(orden_b));
+  if(oA) oA.tecnico = p.origA;
+  if(oB) oB.tecnico = p.origB;
+  _recalcTechCard(p.techA);
+  _recalcTechCard(p.techB);
+  delete SESSION.patches[key];
+}
 
 // ── Colores y helpers ──
 const STATUS_CLASS = {
@@ -1252,26 +1334,41 @@ function renderIntercambios(){
 
 function intAccion(orden, orden_b, accion){
   const key = 'INT_'+orden+'_'+orden_b;
-  if(accion==='aplicar') SESSION.applied[key]=true, delete SESSION.dismissed[key];
-  else if(accion==='descartar') SESSION.dismissed[key]=true, delete SESSION.applied[key];
-  else delete SESSION.applied[key], delete SESSION.dismissed[key];
+  if(accion==='aplicar'){
+    SESSION.applied[key]=true; delete SESSION.dismissed[key];
+    _patchApplyIntercambio(orden, orden_b);
+    renderTecnicos();
+  } else if(accion==='descartar'){
+    SESSION.dismissed[key]=true; delete SESSION.applied[key];
+  } else {
+    _patchRevertIntercambio(orden, orden_b);
+    delete SESSION.applied[key]; delete SESSION.dismissed[key];
+    renderTecnicos();
+  }
   renderIntercambios();
-  const msgs={aplicar:'✓ Intercambio marcado como aplicado',descartar:'— Intercambio descartado',revertir:'↩ Revertido a pendiente'};
+  const msgs={aplicar:'✓ Intercambio aplicado — carga actualizada',descartar:'— Intercambio descartado',revertir:'↩ Revertido — carga restaurada'};
   toast(msgs[accion]||'OK');
 }
 
 async function sugAccion(orden, accion){
   try {
-    await api('/api/sugerencias/accion', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({orden, accion})
-    });
-    if(accion==='aplicar') SESSION.applied[orden]=true, delete SESSION.dismissed[orden];
-    else if(accion==='descartar') SESSION.dismissed[orden]=true, delete SESSION.applied[orden];
-    else delete SESSION.applied[orden], delete SESSION.dismissed[orden];
+    // Llama al backend solo si está en modo servidor (no bloquea si falla)
+    if(!DESKTOP_MODE){
+      api('/api/sugerencias/accion', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orden,accion})}).catch(()=>{});
+    }
+    if(accion==='aplicar'){
+      SESSION.applied[orden]=true; delete SESSION.dismissed[orden];
+      _patchApplySugerencia(orden);
+      renderTecnicos();
+    } else if(accion==='descartar'){
+      SESSION.dismissed[orden]=true; delete SESSION.applied[orden];
+    } else {
+      _patchRevertSugerencia(orden);
+      delete SESSION.applied[orden]; delete SESSION.dismissed[orden];
+      renderTecnicos();
+    }
     renderSugerencias();
-    const msgs={aplicar:'✓ Sugerencia marcada como aplicada',descartar:'— Sugerencia descartada',revertir:'↩ Revertida a pendiente'};
+    const msgs={aplicar:'✓ Sugerencia aplicada — carga actualizada',descartar:'— Sugerencia descartada',revertir:'↩ Revertida — carga restaurada'};
     toast(msgs[accion]||'OK');
   } catch(e){ toast('Error: '+e.message,'error'); }
 }

@@ -55,6 +55,10 @@ BLOCKED_STATUSES = [
     "finalizado",
     "completado",
     "dispositivos subidos",
+    "dispositivos cargados",
+    "por auditar",
+    "mac principal enviada",
+    "sin cargar dispositivos",
     "cancelado",
     "cancelado cliente",
     "cancelado operativo",
@@ -67,6 +71,9 @@ FINALIZED_STATUSES = [
     "finalizado",
     "completado",
     "dispositivos subidos",
+    "dispositivos cargados",   # igual a dispositivos subidos
+    "por auditar",             # orden ejecutada, en revisión de calidad
+    "mac principal enviada",   # paso final FTTH — instalación completa
 ]
 
 CANCELLED_STATUSES = [
@@ -93,6 +100,7 @@ NEAR_FINISH_STATUSES = [
     "iniciada",
     "trabajando",
     "terminando",
+    "sin cargar dispositivos",  # terminó visita, falta cargar equipo
 ]
 
 STATUS_PROGRESS = {
@@ -114,6 +122,10 @@ STATUS_PROGRESS = {
     "no ejecutado":         6,
     "reprogramado":         6,
     "reagendado":           6,
+    "dispositivos cargados":6,
+    "por auditar":          6,
+    "mac principal enviada":6,
+    "sin cargar dispositivos":5,
 }
 
 PROGRESS_FINALIZED = 6

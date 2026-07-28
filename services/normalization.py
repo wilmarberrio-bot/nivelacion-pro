@@ -117,6 +117,14 @@ import csv, os
 _TURNOS_CACHE: dict = {}
 _TURNOS_LOADED: bool = False
 
+def _strip_accents(s: str) -> str:
+    """Quita tildes para comparacion robusta: ANDRES == ANDRES."""
+    return (s.replace("A\u0301","A").replace("E\u0301","E")
+             .replace("\xc1","A").replace("\xc9","E").replace("\xcd","I")
+             .replace("\xd3","O").replace("\xda","U").replace("\xd1","N")
+             .replace("\xe1","a").replace("\xe9","e").replace("\xed","i")
+             .replace("\xf3","o").replace("\xfa","u").replace("\xf1","n"))
+
 def _load_turnos_csv() -> dict:
     """Carga data/turnos.csv una sola vez. Retorna {tecnico_upper: 'T1'|'T2'}."""
     global _TURNOS_CACHE, _TURNOS_LOADED
@@ -135,7 +143,7 @@ def _load_turnos_csv() -> dict:
                 tech = row.get("tecnico", "").strip().upper()
                 turno = row.get("turno", "").strip().upper()
                 if tech and turno in ("T1", "T2"):
-                    result[tech] = turno
+                    result[_strip_accents(tech)] = turno
     except Exception:
         pass
     _TURNOS_CACHE = result
@@ -163,7 +171,7 @@ def detect_turno(tech: str, tech_orders_list: list) -> str:
     """
     # 1. Lookup en CSV
     roster = _load_turnos_csv()
-    tech_key = (tech or "").strip().upper()
+    tech_key = _strip_accents((tech or "").strip().upper())
     if tech_key in roster:
         return roster[tech_key]
     # Búsqueda parcial (por si el nombre en Metabase es más largo)

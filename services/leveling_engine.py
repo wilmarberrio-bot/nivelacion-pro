@@ -909,11 +909,11 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
             if o.get("zona") == recv_zone_main and o.get("movible")
         )
         if pending_in_own_zone > 0:
-            # Tiene ruta propia pendiente: cruzar zona lo obliga a volver
-            score -= 4000  # Penalización muy fuerte — último recurso
+            # Tiene ruta propia pendiente: cruzar zona lo obliga a hacer doble recorrido
+            score -= 12000  # Bloqueo casi total — no mover salvo que no haya otra opción
         else:
-            # No tiene ruta pendiente en su zona: puede ir a otra zona sin doble viaje
-            score -= 800   # Penalización moderada por cambio de zona
+            # Sin órdenes pendientes en su zona propia
+            score -= 6000   # Penalización fuerte — solo si literalmente no hay alternativa local
 
     # Penalización por fragmentación de subzona del receptor
     recv_subzones = len(tech_subzones.get(receiver, set()))
@@ -971,6 +971,14 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
 
         order_franja_start, _ = parse_franja_hours(order.get("franja", ""))
         order_franja_start = order_franja_start or 0.0
+        order_zone = order.get("zona", "SIN_ZONA")
+
+        # Separar candidatos locales (misma zona o adyacente) de interzona
+        # Regla operativa: interzona es ÚLTIMO RECURSO — solo si no existe opción local viable
+        best_local_score    = -9999.0
+        best_local_receiver = None
+        best_cross_score    = -9999.0
+        best_cross_receiver = None
 
         for receiver in techs:
             if receiver == donor:
@@ -978,9 +986,9 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
             if tech_total.get(receiver, 0) >= MAX_ABSOLUTE_LOAD:
                 continue
             if sugs_por_receptor.get(receiver, 0) >= MAX_SUGS_RECEPTOR:
-                continue  # Ya acumuló suficientes sugerencias individuales
+                continue
 
-            # Filtro turno: T1 no recibe 16:00+, T2 no recibe 08:00
+            # Filtro turno
             recv_turno = idx.get("tech_turno", {}).get(receiver)
             if recv_turno is None:
                 recv_turno = detect_turno(receiver, tech_orders.get(receiver, []))
@@ -989,17 +997,38 @@ def _generate_suggestions(orders: list, idx: dict, current_hour: float) -> list:
             if order_franja_start < 9.5 and recv_turno == "T2":
                 continue
 
-            # Cap geográfico: descartar receptores demasiado lejos (ahorro de cómputo)
+            # Cap geográfico
             dist_quick = _dist_to_tech(order, receiver, tech_orders, tech_locs)
             if dist_quick is not None and dist_quick > MAX_DIST_EXCEPTION_KM * 1.5:
-                continue  # Más de 6km: no vale la pena calcular score completo
+                continue
+
+            recv_zone_r = idx["tech_main_zone"].get(receiver, "SIN_ZONA")
+            is_local = (recv_zone_r == order_zone or
+                        order_zone in ZONE_ADJACENCY.get(recv_zone_r, []))
 
             score = _score_suggestion(order, donor, receiver, idx, current_hour)
-            if score > best_score:
-                best_score = score
-                best_receiver = receiver
 
-        if best_receiver is None or best_score < 0:
+            if is_local:
+                if score > best_local_score:
+                    best_local_score = score
+                    best_local_receiver = receiver
+            else:
+                if score > best_cross_score:
+                    best_cross_score = score
+                    best_cross_receiver = receiver
+
+        # Prioridad: local primero — interzona solo si no hay ninguna opción local viable
+        if best_local_score >= 0:
+            best_receiver = best_local_receiver
+            best_score    = best_local_score
+        elif best_cross_score >= 0:
+            # Solo permitir 1 sugerencia interzona total por ejecución de esta orden
+            best_receiver = best_cross_receiver
+            best_score    = best_cross_score
+        else:
+            continue
+
+        if best_receiver is None:
             continue
 
         donor_total_v = tech_total.get(donor, 0)

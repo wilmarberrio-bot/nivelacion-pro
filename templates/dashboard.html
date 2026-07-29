@@ -751,7 +751,7 @@ const ALERT_ICON = {
   'SIN_TECNICO': '👤', 'SIN_FRANJA': '📅',
   'FRANJA_VENCIDA': '⏰', 'FRANJA_ACTIVA_SIN_MARCACION': '🚨',
   'RIESGO_INCUMPLIMIENTO_FRANJA': '⚠️', 'ALCANZADO': '🏁',
-  'CARGA_BAJA': '📉',
+  'CARGA_BAJA': '📉', 'RUTA_DISPERSA': '🗺️',
 };
 
 function esc(s){ return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]) }
@@ -1181,7 +1181,7 @@ function renderAlertas(){
       <div class="alert-body">
         <div class="title">${esc(a.tipo||'').replace(/_/g,' ')}</div>
         <div class="detail">${esc(a.detalle)}</div>
-        ${a.tecnico?`<div style="font-size:11px;color:var(--text3);margin-top:2px">👷 ${esc(a.tecnico)} ${a.franja?'· ⏰ '+esc(a.franja):''}</div>`:''}
+        ${a.tecnico?`<div style="font-size:11px;color:var(--text3);margin-top:2px">👷 ${esc(a.tecnico)} ${a.franja?'· ⏰ '+esc(a.franja):''} ${a.spread_km?'· 📍 '+a.spread_km+'km dispersión':''}</div>`:''}
       </div>
       <span class="alert-badge">${esc(a.severidad||'media').toUpperCase()}</span>
     </div>`).join('');

@@ -20,7 +20,7 @@ from config import (
     LUNCH_START_T1, LUNCH_END_T1, LUNCH_START_T2, LUNCH_END_T2,
     ALCANZADO_BUFFER_HOURS, T2_MAX_ORDERS_10H_SLOT,
     GEO_BONUS_0_5KM, GEO_BONUS_1KM, GEO_BONUS_2KM, GEO_PENALTY_OVER,
-    FRANJA_DUP_PENALTY,
+    FRANJA_DUP_PENALTY, RUTA_DISPERSA_KM, GEO_CENTROID_RADIUS,
 )
 from services.normalization import (
     normalize_order, haversine, get_centroid, is_same_unit, order_has_coords,
@@ -289,7 +289,7 @@ def _build_indexes(orders: list) -> dict:
         # tech_subzones
         tech_subzones.setdefault(tech, set()).add(subzona)
 
-        # tech_locs
+        # tech_locs — solo coords válidas (normalization.py ya filtró las corruptas)
         if o.get("lat") and o.get("lon"):
             tech_locs.setdefault(tech, []).append((o["lat"], o["lon"]))
 
@@ -333,12 +333,20 @@ def _build_indexes(orders: list) -> dict:
         for t in tech_orders
     }
 
+    # Centroide real de cada técnico (promedio lat/lon de sus órdenes con coords válidas)
+    tech_centroid = {
+        t: get_centroid(locs)
+        for t, locs in tech_locs.items()
+        if locs
+    }
+
     return {
         "tech_orders":         tech_orders,
         "tech_franja":         tech_franja,
         "tech_franja_active":  tech_franja_active,   # sin finalizadas ni canceladas
         "tech_subzones":       tech_subzones,
         "tech_locs":           tech_locs,
+        "tech_centroid":       tech_centroid,         # centroide geográfico del técnico
         "tech_main_zone":      tech_main_zone,
         "zone_techs":          {z: list(ts) for z, ts in zone_techs.items()},
         "tech_total":          tech_total,
@@ -691,6 +699,33 @@ def _generate_alerts(orders: list, idx: dict, now_dt) -> list:
                 ),
             })
 
+    # 9. Alerta RUTA_DISPERSA: técnico con órdenes muy dispersas geográficamente
+    # Calcula el spread máx entre sus órdenes (haversine). Si > RUTA_DISPERSA_KM → alerta.
+    tech_locs_idx = idx.get("tech_locs", {})
+    for tech, locs in tech_locs_idx.items():
+        if tech == "SIN_ASIGNAR" or len(locs) < 3:
+            continue
+        max_spread = 0.0
+        far_pair = None
+        for i in range(len(locs)):
+            for j in range(i + 1, len(locs)):
+                d = haversine(locs[i][0], locs[i][1], locs[j][0], locs[j][1])
+                if d > max_spread:
+                    max_spread = d
+                    far_pair = (locs[i], locs[j])
+        if max_spread > RUTA_DISPERSA_KM:
+            sev = "alta" if max_spread > RUTA_DISPERSA_KM * 1.5 else "media"
+            alerts.append({
+                "tipo":      "RUTA_DISPERSA",
+                "severidad": sev,
+                "tecnico":   tech,
+                "spread_km": round(max_spread, 1),
+                "detalle": (
+                    f"{tech} tiene órdenes separadas {max_spread:.1f}km. "
+                    f"Ruta dispersa — considerar reasignar orden más alejada del centroide."
+                ),
+            })
+
     return alerts
 
 
@@ -833,6 +868,24 @@ def _score_suggestion(order: dict, donor: str, receiver: str,
             score += GEO_BONUS_2KM      # < 2km: aceptable
         elif dist_recv < MAX_DIST_EXCEPTION_KM:
             score += 150                # 2-4km: excepción justificada
+
+    # ─── Bono por proximidad al CENTROIDE del receptor ───────────────────────
+    # Complementa el scoring de orden activa: aunque no sepamos dónde estará el técnico
+    # a esa hora, sí sabemos dónde está concentrada su ruta. Prioriza asignar órdenes
+    # que compactan la ruta (reducen el spread geográfico).
+    tech_centroid = idx.get("tech_centroid", {})
+    recv_centroid = tech_centroid.get(receiver)
+    if recv_centroid and recv_centroid != (0.0, 0.0) and order.get("lat") and order.get("lon"):
+        dist_centroid = haversine(recv_centroid[0], recv_centroid[1], order["lat"], order["lon"])
+        if dist_centroid < 1.0:
+            score += 600     # Muy cerca del centroide — compacta la ruta
+        elif dist_centroid < 2.0:
+            score += 300
+        elif dist_centroid < GEO_CENTROID_RADIUS:
+            score += 100
+        else:
+            # La orden alejaría el centroide → penalización proporcional
+            score -= int((dist_centroid - GEO_CENTROID_RADIUS) * 200)
 
     # ─── Bonus/penalización por zona ───
     recv_zone_main = idx["tech_main_zone"].get(receiver, "SIN_ZONA")

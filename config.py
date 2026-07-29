@@ -28,8 +28,8 @@ COL_ZONE       = os.environ.get("COL_ZONE",        "zona")
 COL_SUBZONE    = os.environ.get("COL_SUBZONE",     "subzona")
 COL_ADDRESS    = os.environ.get("COL_ADDRESS",     "direccion")
 COL_GMAPS      = os.environ.get("COL_GMAPS",       "google_maps")
-COL_LAT        = os.environ.get("COL_LAT",         "latitud")
-COL_LON        = os.environ.get("COL_LON",         "longitud")
+COL_LAT        = os.environ.get("COL_LAT",         "Latitude")   # Excel Metabase exporta 'Latitude'
+COL_LON        = os.environ.get("COL_LON",         "Longitude")  # Excel Metabase exporta 'Longitude'
 COL_UPDATED_AT = os.environ.get("COL_UPDATED_AT",  "updated_at")
 
 FRANJAS = [
@@ -190,6 +190,14 @@ MIN_ROUTE_SAVINGS_PCT              = 0.30
 MIN_ROUTE_SCORE_BENEFIT            = 350
 NEARBY_BUILDING_RADIUS_KM          = 0.25
 MAX_SWAP_DISTANCE_INCREASE_KM      = 2.0
+
+# ── Geo — bounding box Antioquia + alerta de ruta dispersa ───────────────────
+ANTIOQUIA_LAT_MIN    = 5.5    # Caldas sur
+ANTIOQUIA_LAT_MAX    = 7.5    # Caucasia norte
+ANTIOQUIA_LON_MIN    = -77.0  # oeste
+ANTIOQUIA_LON_MAX    = -74.0  # oriente (Rionegro ~-75.3)
+RUTA_DISPERSA_KM     = 6.0    # spread máx entre órdenes de un técnico antes de alertar
+GEO_CENTROID_RADIUS  = 3.0    # km: si la orden está más lejos del centroide, penalizar
 MIN_SAVED_KM_FOR_SWAP              = 0.5
 MAX_INTERZONE_ASSIGNMENTS_PER_TECH = 1
 

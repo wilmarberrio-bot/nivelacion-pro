@@ -80,7 +80,71 @@ def normalize_address_key(addr):
 def build_address_key(address,subzona):
     b=normalize_address_key(address) if address else ""
     return b if b else (subzona or "SIN_SUBZONA").upper()[:60]
-def order_has_coords(order): return bool(order.get("lat",0) and order.get("lon",0))
+# ── Mapeo robusto de columnas del Excel de Metabase ──────────────────────────
+# El Excel exporta: 'Latitude','Longitude','Zone Name','Cities__name','Addresses__address',
+# 'status_txt','appointment_type_txt','franja_label','Google Maps Link','Sites','appointment_id'
+# Esta función renombra los keys al esquema interno antes de normalize_order()
+_COL_ALIASES = {
+    # id
+    "id":           ["appointment_id","id_orden","id","orden"],
+    # tecnico
+    "tecnico":      ["tecnico","technician","tech"],
+    # estado
+    "estado":       ["status_txt","status","estado","estado_txt"],
+    # franja
+    "franja":       ["franja_label","franja","slot","horario","franja_horaria"],
+    # tipo
+    "tipo":         ["appointment_type_txt","appointment_type","category","tipo","type","tipo_trabajo"],
+    # zona
+    "zona":         ["zone name","zone_name","zona","zone","zona_name"],
+    # subzona
+    "subzona":      ["subzone","subzona","sub_zone","sub zone"],
+    # ciudad
+    "ciudad":       ["cities__name","cities_name","ciudad","city","city_name"],
+    # dirección
+    "direccion":    ["addresses__address","addresses_address","address","direccion","direccion_str"],
+    # google maps
+    "gmaps":        ["google maps link","google maps","gmaps","maps_link","link_maps"],
+    # lat/lon — soporta Latitude, latitude, latitud, Latitud, lat
+    "lat":          ["latitude","latitud","lat","Latitude","Latitud"],
+    "lon":          ["longitude","longitud","lon","Longitude","Longitud"],
+    # timestamp
+    "updated_at":   ["onsite_at_cot","updated_at","updated at","fecha_actualizacion"],
+    # supervisor notes
+    "notas":        ["supervisor_notes","notas","notes"],
+    # sites (para subzona de respaldo)
+    "sites":        ["sites","site","sitio"],
+}
+
+def _normalize_col_keys(row: dict) -> dict:
+    """
+    Devuelve un nuevo dict con keys normalizadas al esquema interno.
+    Las keys no reconocidas se conservan tal cual.
+    Opera en O(n*m) pero n<20 y m<10 en la práctica.
+    """
+    lowered = {str(k).strip().lower(): v for k, v in row.items()}
+    result = dict(row)  # empieza con los originales
+    for internal, candidates in _COL_ALIASES.items():
+        for c in candidates:
+            if c.lower() in lowered:
+                val = lowered[c.lower()]
+                if val is not None and str(val).strip() not in ("", "None", "nan"):
+                    result[internal] = val
+                elif internal not in result or result.get(internal) is None:
+                    result[internal] = val
+                break
+    return result
+
+# ── Validación de coordenadas dentro de Antioquia ────────────────────────────
+# Bounding box amplio para toda el área metropolitana + Rionegro + Caldas
+_LAT_MIN, _LAT_MAX = 5.5, 7.5
+_LON_MIN, _LON_MAX = -77.0, -74.0
+
+def _valid_coords(lat: float, lon: float) -> bool:
+    """Verifica que las coordenadas estén dentro del área de Antioquia."""
+    return (_LAT_MIN <= lat <= _LAT_MAX) and (_LON_MIN <= lon <= _LON_MAX)
+
+def order_has_coords(order): return bool(order.get("lat",0) and order.get("lon",0) and _valid_coords(float(order.get("lat",0)), float(order.get("lon",0))))
 def is_same_unit(o1,o2):
     ak1=o1.get("addr_key",""); ak2=o2.get("addr_key","")
     if ak1 and ak1==ak2: return True
@@ -89,20 +153,32 @@ def is_same_unit(o1,o2):
         except: pass
     return False
 def normalize_order(order):
-    o=dict(order)
+    # Mapear columnas del Excel al esquema interno primero
+    o = _normalize_col_keys(dict(order))
     o["tecnico"]=norm_text(o.get("tecnico"),"SIN_ASIGNAR") or "SIN_ASIGNAR"
     o["estado"]=norm_text(o.get("estado"),"por programar")
     o["franja"]=norm_franja(o.get("franja"))
-    # Zona con fallback a Cities__name cuando está vacía
+    # Zona con fallback a Cities__name (103 órdenes sin Zone Name en Metabase)
     zona_raw = o.get("zona", "") or ""
     ciudad_raw = o.get("ciudad", "") or ""
     if not zona_raw or str(zona_raw).strip().upper() in ("SIN_ZONA", "NONE", "NAN", ""):
         o["zona"] = norm_zone(ciudad_raw) if ciudad_raw else "SIN_ZONA"
     else:
         o["zona"] = norm_zone(zona_raw)
-    o["subzona"]=norm_subzone(o.get("subzona"))
+    # Subzona: si vacía, usar Sites como respaldo
+    subzona_raw = o.get("subzona", "") or o.get("sites", "") or ""
+    o["subzona"] = norm_subzone(subzona_raw)
     o["tipo"]=norm_text(o.get("tipo"),"instalacion").lower()
-    o["lat"]=float(o.get("lat") or 0); o["lon"]=float(o.get("lon") or 0)
+    # Coordenadas — validar que estén dentro de Antioquia (filtra coords corruptas)
+    try:
+        lat = float(o.get("lat") or 0)
+        lon = float(o.get("lon") or 0)
+        if lat and lon and _valid_coords(lat, lon):
+            o["lat"] = lat; o["lon"] = lon
+        else:
+            o["lat"] = 0.0; o["lon"] = 0.0
+    except (ValueError, TypeError):
+        o["lat"] = 0.0; o["lon"] = 0.0
     o["estado_clase"]=classify_status(o["estado"])
     o["progress"]=get_status_progress(o["estado"])
     o["effective_weight"]=status_effective_weight(o["estado"])

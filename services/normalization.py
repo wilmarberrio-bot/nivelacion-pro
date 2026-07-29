@@ -2,7 +2,7 @@
 import re, math
 from config import (MOVABLE_STATUSES,BLOCKED_STATUSES,NEAR_FINISH_STATUSES,
     FINALIZED_STATUSES,STATUS_PROGRESS,FRANJAS,NEARBY_BUILDING_RADIUS_KM)
-
+ 
 def norm_text(x,default=""): return str(x).strip() if x is not None else default
 def norm_upper(x,default="SIN_VALOR"):
     s=norm_text(x,default)
@@ -115,7 +115,7 @@ _COL_ALIASES = {
     # sites (para subzona de respaldo)
     "sites":        ["sites","site","sitio"],
 }
-
+ 
 def _normalize_col_keys(row: dict) -> dict:
     """
     Devuelve un nuevo dict con keys normalizadas al esquema interno.
@@ -134,16 +134,16 @@ def _normalize_col_keys(row: dict) -> dict:
                     result[internal] = val
                 break
     return result
-
+ 
 # ── Validación de coordenadas dentro de Antioquia ────────────────────────────
 # Bounding box amplio para toda el área metropolitana + Rionegro + Caldas
 _LAT_MIN, _LAT_MAX = 5.5, 7.5
 _LON_MIN, _LON_MAX = -77.0, -74.0
-
+ 
 def _valid_coords(lat: float, lon: float) -> bool:
     """Verifica que las coordenadas estén dentro del área de Antioquia."""
     return (_LAT_MIN <= lat <= _LAT_MAX) and (_LON_MIN <= lon <= _LON_MAX)
-
+ 
 def order_has_coords(order): return bool(order.get("lat",0) and order.get("lon",0) and _valid_coords(float(order.get("lat",0)), float(order.get("lon",0))))
 def is_same_unit(o1,o2):
     ak1=o1.get("addr_key",""); ak2=o2.get("addr_key","")
@@ -186,13 +186,13 @@ def normalize_order(order):
     o["addr_key"]=build_address_key(o.get("direccion",""),o["subzona"])
     o["movible"]=o["estado_clase"]=="movible"
     return o
-
+ 
 # ── Turno detection ──────────────────────────────────────────────────────────
 import csv, os
-
+ 
 _TURNOS_CACHE: dict = {}
 _TURNOS_LOADED: bool = False
-
+ 
 def _strip_accents(s: str) -> str:
     """Quita tildes para comparacion robusta: ANDRES == ANDRES."""
     return (s.replace("A\u0301","A").replace("E\u0301","E")
@@ -200,7 +200,7 @@ def _strip_accents(s: str) -> str:
              .replace("\xd3","O").replace("\xda","U").replace("\xd1","N")
              .replace("\xe1","a").replace("\xe9","e").replace("\xed","i")
              .replace("\xf3","o").replace("\xfa","u").replace("\xf1","n"))
-
+ 
 def _load_turnos_csv() -> dict:
     """Carga data/turnos.csv una sola vez. Retorna {tecnico_upper: 'T1'|'T2'}."""
     global _TURNOS_CACHE, _TURNOS_LOADED
@@ -225,13 +225,13 @@ def _load_turnos_csv() -> dict:
     _TURNOS_CACHE = result
     _TURNOS_LOADED = True
     return result
-
+ 
 def reload_turnos_csv() -> dict:
     """Fuerza recarga del CSV (útil en desarrollo / tests)."""
     global _TURNOS_LOADED
     _TURNOS_LOADED = False
     return _load_turnos_csv()
-
+ 
 def detect_turno(tech: str, tech_orders_list: list) -> str:
     """
     Determina el turno de un técnico.
@@ -254,7 +254,7 @@ def detect_turno(tech: str, tech_orders_list: list) -> str:
     for key, turno in roster.items():
         if key and (key in tech_key or tech_key in key):
             return turno
-
+ 
     # 2. Auto-detección desde órdenes
     if not tech_orders_list:
         return "T1"
